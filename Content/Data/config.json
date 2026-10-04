@@ -1,0 +1,245 @@
+{
+  "title": "Ports of Plague",
+  "players": {
+    "min": 2,
+    "max": 6
+  },
+  "rounds": 12,
+  "start": {
+    "florins": 12,
+    "family": 5,
+    "reputation": 7,
+    "posts": 1
+  },
+  "limits": {
+    "maxPosts": 6,
+    "maxReputation": 20,
+    "minReputation": 0,
+    "moveFamilyMax": 2,
+    "charityPerTurn": 1,
+    "dealRounds": 2,
+    "gatesRounds": 2,
+    "marriagePerTurn": 1
+  },
+  "actionPointCosts": {
+    "post": 2,
+    "move": 2
+  },
+  "costs": {
+    "openPost": 8,
+    "prepareHousehold": 2,
+    "physician": 2,
+    "charity": 4,
+    "charityDiscountLastPlace": 1,
+    "protectCommunity": 3,
+    "wageAftermath": 1,
+    "marriage": 6,
+    "buyLand": 6,
+    "landWage": 1,
+    "holdOffshore": 2,
+    "loanRepay": 8
+  },
+  "gains": {
+    "charityReputation": 1,
+    "protectReputation": 3,
+    "inheritance": 3,
+    "familyAtPostBonus": 1,
+    "aftermathPriceBonus": 2,
+    "loan": 6,
+    "dealBonus": 1,
+    "dealShipperBonus": 1,
+    "marriageFamily": 1
+  },
+  "penalties": {
+    "fleeReputation": 1,
+    "infectedCargoReputation": 1,
+    "unrestProfit": 1,
+    "unrestRounds": 2,
+    "gatesReputation": 1,
+    "gatesProfit": 1,
+    "loanDefaultReputation": 2
+  },
+  "plague": {
+    "strickenRounds": 2,
+    "severityTable": {
+      "1": 1,
+      "2": 1,
+      "3": 2,
+      "4": 2,
+      "5": 3,
+      "6": 3
+    },
+    "severityNames": {
+      "1": "Light",
+      "2": "Heavy",
+      "3": "Devastating"
+    },
+    "severityMax": 3,
+    "prepareBonus": 1,
+    "physicianSaveOn": 6,
+    "earlyArrivalWindow": 1
+  },
+  "shipping": {
+    "profitDie": 6,
+    "infectedProfitFactor": 0.5,
+    "shipsPerPostPerRound": 1
+  },
+  "comeback": {
+    "guildFavorFromRound": 5,
+    "guildFavorAP": 1,
+    "guildFavorMinGap": 6
+  },
+  "scoring": {
+    "florinsPerPoint": 6,
+    "pointsPerPost": 1,
+    "pointsPerFamily": 3,
+    "reputationPoints": 1,
+    "reputationSoftCap": 10,
+    "reputationHighRate": 3,
+    "balanceBonus": "lowest",
+    "pointsPerLand": 2
+  },
+  "difficulty": {
+    "apprentice": {
+      "label": "Apprentice",
+      "severityMod": -1,
+      "contagionMod": 0,
+      "hints": true,
+      "eventsPerRound": 1
+    },
+    "chronicler": {
+      "label": "Chronicler",
+      "severityMod": 0,
+      "contagionMod": 0,
+      "hints": false,
+      "eventsPerRound": 1
+    },
+    "mortality": {
+      "label": "Great Mortality",
+      "severityMod": 1,
+      "contagionMod": 1,
+      "hints": false,
+      "eventsPerRound": 1
+    }
+  },
+  "timing": {
+    "note": "Seconds for players at a decent pace (see tools/simulate.js).",
+    "secondsPerAction": 10,
+    "secondsPerShipResult": 2.5,
+    "secondsPerDecision": 6,
+    "secondsPerFortuneCard": 10,
+    "secondsPerTurnChange": 5,
+    "secondsPerRoundBanner": 10,
+    "secondsPerChroniclePage": 20,
+    "secondsPerEventCard": 15,
+    "secondsPerPlagueCard": 15,
+    "secondsPerQuietPlague": 2,
+    "secondsSetup": 60,
+    "shipResultAutoCloseMs": 2000
+  },
+  "keyboard": {
+    "ship": "1",
+    "post": "2",
+    "move": "3",
+    "prepare": "4",
+    "physician": "5",
+    "charity": "6",
+    "marry": "7",
+    "land": "8",
+    "loan": "9",
+    "deal": "0",
+    "gates": "G",
+    "endTurn": "E",
+    "rules": "R",
+    "journal": "J",
+    "mute": "M"
+  },
+  "wageLaw": {
+    "obeyReputation": 1,
+    "fine": 3,
+    "fineMaxRoll": 2
+  },
+  "modes": {
+    "standard": {
+      "label": "Standard",
+      "span": 1,
+      "actionPoints": 2,
+      "description": "12 rounds of half a year each."
+    },
+    "quick": {
+      "label": "Quick Play",
+      "span": 3,
+      "actionPoints": 3,
+      "description": "4 rounds of a year and a half each; the plague rolls three times per round."
+    }
+  },
+  "prePlague": {
+    "halves": 2,
+    "rounds": {
+      "standard": 2,
+      "quick": 1
+    },
+    "postDiscount": 3
+  },
+  "turnTimer": {
+    "seconds": 30,
+    "warnAt": 10
+  },
+  "bots": {
+    "minHumans": 1,
+    "thinkSeconds": 1.2,
+    "cardSeconds": 8,
+    "skills": {
+      "easy": {
+        "label": "Easy",
+        "mistakes": 0.35,
+        "strategies": [
+          "greedy",
+          "cautious",
+          "charitable"
+        ],
+        "description": "Plays a simple style and often makes mistakes."
+      },
+      "medium": {
+        "label": "Medium",
+        "mistakes": 0.12,
+        "strategies": [
+          "greedy",
+          "cautious",
+          "charitable",
+          "balanced"
+        ],
+        "description": "A sensible merchant who sometimes slips."
+      },
+      "hard": {
+        "label": "Hard",
+        "mistakes": 0,
+        "strategies": [
+          "balanced"
+        ],
+        "description": "Weighs every choice by its Legacy points. Rarely beaten."
+      }
+    }
+  },
+  "fortune": {
+    "drawOnProfitDie": 6,
+    "drawOnNewPost": true
+  },
+  "turnOrderDie": 6,
+  "timeEstimates": {
+    "standard": {
+      "2": 28,
+      "3": 36,
+      "4": 44,
+      "5": 52,
+      "6": 59
+    },
+    "quick": {
+      "2": 13,
+      "3": 17,
+      "4": 20,
+      "5": 24,
+      "6": 27
+    }
+  }
+}

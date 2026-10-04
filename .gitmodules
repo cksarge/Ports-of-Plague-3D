@@ -1,0 +1,3 @@
+[submodule "ports_web_reference_READ_ONLY"]
+	path = ports_web_reference_READ_ONLY
+	url = https://github.com/cksarge/Ports-of-Plague

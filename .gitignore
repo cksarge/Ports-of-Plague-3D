@@ -1,0 +1,16 @@
+# Made by Unreal when the project is built or run
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+*.xcworkspace
+*.sln
+
+# The six songs as uncompressed sound, about 200 MB: made again from the web
+# version's own files by Tools/make_music.sh
+SourceArt/Music/
+
+# This computer only
+.DS_Store
+.vscode/
+.mcp.json
