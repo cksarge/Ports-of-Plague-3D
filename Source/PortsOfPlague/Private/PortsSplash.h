@@ -23,7 +23,9 @@ public:
 
 	void Construct(const FArguments& Args);
 	// How long the splash is on screen, in seconds.
-	static float Seconds(bool bCustom, bool bBlank = false) { return bBlank ? BlankSeconds : (bCustom ? 4.7f : 3.1f) + FadeSeconds; }
+	static float Seconds(bool bCustom, bool bBlank = false) { return bBlank ? BlankSeconds : (bCustom ? 6.4f : 3.1f) + FadeSeconds; }
+	// Both hold the finished, still logo for the same 1.8 seconds before it goes. The official logo is whole from
+	// 0.7 seconds in; the custom one takes until 4 seconds in to be drawn and gilded, so it is that much longer.
 	// How long the dark screen takes to fade away at the end, onto the start screen.
 	static constexpr float FadeSeconds = 1.7f;
 	static constexpr float BlankSeconds = 0.3f + FadeSeconds;
