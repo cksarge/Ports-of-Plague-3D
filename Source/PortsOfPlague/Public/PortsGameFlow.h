@@ -24,6 +24,9 @@ struct FPortsUiState
 	int32 seenSeq = 0;
 	// The facts of the latest historical note.
 	TArray<FString> lastNote;
+	// A multi-device game: its room code and seats, so that the room can be opened again from a saved game.
+	FString roomCode;
+	FPortsValue roomSeats;
 };
 
 UCLASS()
@@ -69,6 +72,7 @@ private:
 	double Now() const;
 	TSharedRef<SWidget> BuildTopBar();
 	TSharedRef<SWidget> BuildSidebar();
+	TSharedRef<SWidget> BuildSidebarWith(int32 LogLines, bool bNote, float Zoom);
 
 	// ---------- Saving ----------
 	FString SavePath() const;
@@ -101,6 +105,8 @@ private:
 	void Story(const FString& Kind, const FPortsValue& Data, TFunction<void()> After = nullptr);
 	void BuildStory(const FString& Kind, const FPortsValue& Data, FPortsDoc& Doc, FString& Button, FPortsDialogOptions& Options) const;
 	void OpenStoryPage(const FString& Kind, const FPortsValue& Data);
+	TArray<FPortsValue> StoryPages(const FString& Kind, const FPortsValue& Data) const;
+	float StoryZoom(const FString& Kind, const FPortsValue& Page) const;
 
 	// ---------- Choices (PortsFlowPrompts.cpp) ----------
 	void OpenActionPrompt(const FString& Id);
@@ -150,6 +156,7 @@ private:
 
 	TSharedPtr<class SBox> TopBarSlot;
 	TSharedPtr<class SBox> SidebarSlot;
+	TSharedPtr<class SScrollBox> SideScroll;
 	// Redraws the map legend when it is folded or opened.
 	TSharedPtr<TFunction<void()>> LegendKeep;
 	// The inside of the setup screen's frame, while that screen is showing.
@@ -166,6 +173,32 @@ private:
 	// Nothing new is shown for this long; a click or a key ends it at once.
 	void HoldFor(double Seconds);
 	double HoldUntil = 0;
+	// ---------- Multi-device play (PortsNet.h) ----------
+	// The room being filled on the new-game screen, and the room of the game being played (if it is a multi-device game).
+	TSharedPtr<class FPortsRoom> LobbyRoom;
+	TSharedPtr<class FPortsRoom> Room;
+	void OpenLobbyRoom();
+	void CloseLobbyRoom();
+	// What the players' devices need besides the state (view() in game.js).
+	FPortsValue DeviceView() const;
+	// Sends the game as it stands to the devices, a moment from now (several changes at once go as one message).
+	void PushToDevices();
+	// This is the big screen of a multi-device game: players choose on their own devices, not here.
+	bool Remote() const { return Room.IsValid(); }
+	// The house's player left the game on their device: it sits out until they rejoin.
+	bool HasLeft(const struct FPortsPlayer* Player) const;
+	// Opens a saved multi-device game's room again, then carries on with the game.
+	void ReopenRoom();
+	void AdoptRoom();
+	// A request from a device: an action, an answer to a card, ending the turn, or Next on a story card.
+	void HandleIntent(const FPortsValue& Message);
+	// The story card on screen, which any device can read and press Next on.
+	int32 StorySeq = 0, StoryId = 0;
+	FString StoryTitle, StoryLabel, StoryKind;
+	FPortsValue StoryData;
+	double PushAt = 0;
+	bool bLastHold = false;
+
 	// ---------- Sound (PortsFlowAudio.cpp) ----------
 	// Plays one of the web version's sound effects by name, now or a little later.
 	void Sound(const TCHAR* Name, double AfterSeconds = 0);
@@ -225,4 +258,17 @@ private:
 	FString TestPrompt;
 	FString TestHold;
 	bool bTestFlip = false;
+	bool bTestScrollEnd = false;
+	int32 MenuDueIn = 0;
+	bool bTestLobbyPlay = false, bTestLobbyTimer = false;
+	int32 TestLobbyHumans = 1;
+	FString TestLobbySpec;
+	double TestDropAt = -1;
+	void TestLobbyPlay();
+	// A script of clicks and key presses from the command line (PortsFlowTest.cpp).
+	TArray<FString> TestSteps;
+	int32 TestStep = -1;
+	double TestStepAt = 0, TestStepGiveUp = 0, TestStepPatience = 40;
+	FString TestKeyUp;
+	void TestScriptTick();
 };

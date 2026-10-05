@@ -3,6 +3,7 @@
 #include "PortsCameraPawn.h"
 #include "PortsMapActor.h"
 #include "PortsMapSpace.h"
+#include "PortsNet.h"
 #include "PortsUi.h"
 #include "SPortsRoot.h"
 #include "Engine/GameViewportClient.h"
@@ -49,11 +50,18 @@ void UPortsGameFlow::Start(APortsMapActor* InMap)
 	// Every button clicks (main.js).
 	PortsUi::SetClickSound([this]() { Sound(TEXT("click")); });
 	PortsUi::SetDiceSound([this]() { Sound(TEXT("dice")); });
-	ShowMenu();
+	// The menu is drawn a few frames in, once the window knows how sharp its screen is: drawn at once, its text is
+	// measured for an ordinary screen and shifts a little when the Retina measurements arrive.
+	MenuDueIn = 3;
 }
 
 void UPortsGameFlow::Stop()
 {
+	// Closing the game tells every device the big screen has gone.
+	if (LobbyRoom.IsValid()) LobbyRoom->Close();
+	if (Room.IsValid()) Room->Close();
+	LobbyRoom.Reset();
+	Room.Reset();
 	if (Root.IsValid())
 	{
 		if (UGameViewportClient* Viewport = Map && Map->GetWorld() ? Map->GetWorld()->GetGameViewport() : nullptr) Viewport->RemoveViewportWidgetContent(Root.ToSharedRef());
@@ -109,6 +117,9 @@ bool UPortsGameFlow::Busy() const
 void UPortsGameFlow::Notify(const FString& Text, float Seconds)
 {
 	if (Root.IsValid() && !Text.IsEmpty()) Root->Toast(Text, Seconds);
+	// On several devices the message also goes to the device of the house whose turn it is.
+	const FPortsPlayer* P = bInGame && Room.IsValid() ? Ports::CurrentPlayer(State) : nullptr;
+	if (P && !P->bot && !Text.IsEmpty()) Room->Toast(P->id, Text);
 }
 
 // ---------- Saving ----------
@@ -126,9 +137,11 @@ void UPortsGameFlow::Save()
 	const V Out = V::Object({
 		{ TEXT("savedAt"), static_cast<double>(FDateTime::UtcNow().ToUnixTimestamp()) * 1000.0 },
 		{ TEXT("state"), State.ToValue() },
-		{ TEXT("ui"), V::Object({ { TEXT("hints"), Ui.hints }, { TEXT("seenSeq"), Ui.seenSeq }, { TEXT("lastNote"), V::Strings(Ui.lastNote) } }) },
+		{ TEXT("ui"), V::Object({ { TEXT("hints"), Ui.hints }, { TEXT("seenSeq"), Ui.seenSeq }, { TEXT("lastNote"), V::Strings(Ui.lastNote) },
+			{ TEXT("room"), Room.IsValid() ? V::Object({ { TEXT("code"), V(Room->Code) }, { TEXT("seats"), Room->SavedSeatsValue() } }) : V::Null() } }) },
 	});
 	FFileHelper::SaveStringToFile(Out.ToJson(), *SavePath(), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	PushToDevices();
 }
 
 bool UPortsGameFlow::LoadSaved(FPortsState& OutState, FPortsUiState& OutUi) const
@@ -142,6 +155,8 @@ bool UPortsGameFlow::LoadSaved(FPortsState& OutState, FPortsUiState& OutUi) cons
 	OutUi.hints = U.Get(TEXT("hints")).Truthy();
 	OutUi.seenSeq = U.Get(TEXT("seenSeq")).AsInt();
 	OutUi.lastNote = U.Get(TEXT("lastNote")).ToStrings();
+	OutUi.roomCode = U.Get(TEXT("room")).Get(TEXT("code")).AsString();
+	OutUi.roomSeats = U.Get(TEXT("room")).Get(TEXT("seats"));
 	return true;
 }
 
@@ -158,6 +173,52 @@ void UPortsGameFlow::TestCheckResult()
 	UE_LOG(LogTemp, Display, TEXT("PortsResult: %s houses=%d rounds=%d scores=%s engine=%s"), *TestSetup->mode, State.players.Num(), Ports::TotalRounds(State), *Scores, bSame ? TEXT("SAME") : TEXT("DIFFERENT"));
 	TestSetup.Reset();
 	if (FParse::Param(FCommandLine::Get(), TEXT("PortsQuitAtEnd"))) FPlatformMisc::RequestExit(false);
+}
+
+bool UPortsGameFlow::HasLeft(const FPortsPlayer* Player) const
+{
+	return Room.IsValid() && Player && Room->Seats.IsValidIndex(Player->id) && Room->Seats[Player->id].left;
+}
+
+V UPortsGameFlow::DeviceView() const
+{
+	// The story card waiting for Next (if any), whether the big screen is busy, and the turn clock.
+	const V Next = StoryId ? V::Object({ { TEXT("id"), StoryId }, { TEXT("label"), V(StoryLabel) }, { TEXT("title"), V(StoryTitle) }, { TEXT("kind"), V(StoryKind) }, { TEXT("data"), StoryData } }) : V::Null();
+	const bool bActing = (Map && Map->IsAnimating()) || Steps.Num() > 0 || HoldUntil > 0;
+	const bool bHold = Root.IsValid() && (Root->HasStoryDialog() || bActing);
+	const V Timer = bClockOn ? V::Object({ { TEXT("left"), FMath::RoundToDouble(FMath::Max(0.0, ClockLeft) * 10.0) / 10.0 }, { TEXT("running"), !bHold } }) : V::Null();
+	return V::Object({ { TEXT("next"), Next }, { TEXT("busy"), bActing }, { TEXT("hints"), Ui.hints }, { TEXT("note"), V::Strings(Ui.lastNote) }, { TEXT("timer"), Timer } });
+}
+
+void UPortsGameFlow::PushToDevices()
+{
+	if (Room.IsValid() && PushAt <= 0) PushAt = FPlatformTime::Seconds() + 0.06;
+}
+
+// handleRequest in game.js: the checks first, then the same steps a click on this screen would take.
+void UPortsGameFlow::HandleIntent(const V& M)
+{
+	if (!Room.IsValid() || !bInGame) return;
+	const FString From = M.Get(TEXT("from")).AsString(), T = M.Get(TEXT("t")).AsString();
+	const int32 Seat = Room->Seats.IndexOfByPredicate([&From](const FPortsSeat& S) { return S.cid == From; });
+	const FString Problem = PortsNet::ValidateIntent(State, Room->Seats, M);
+	if (!Problem.IsEmpty()) Room->Toast(Seat, Problem);
+	else if (T == TEXT("next"))
+	{
+		if (StoryId && M.Get(TEXT("id")).AsInt() == StoryId) Root->CloseTop(TEXT("ok"));
+	}
+	else if (Busy()) Room->Toast(Seat, TEXT("Please wait…"));
+	else if (T == TEXT("act")) RunAction(FPortsAction::FromValue(M.Get(TEXT("action"))));
+	else if (T == TEXT("decide"))
+	{
+		const V& C = M.Get(TEXT("choice"));
+		ApplyDecision(C.IsString() ? (C.AsString() == TEXT("obey") ? EPortsChoice::Obey : EPortsChoice::Pay) : C.AsBool() ? EPortsChoice::Yes : EPortsChoice::No);
+		Pump();
+	}
+	else if (T == TEXT("end")) FinishTurn();
+	Room->Handled(M);
+	Refresh();
+	PushToDevices();
 }
 
 void UPortsGameFlow::ClearSave()
@@ -206,6 +267,7 @@ void UPortsGameFlow::Pump()
 		}
 		if (PresentNew()) continue;
 		// The game is over: the finale plays, then the results (straight to the results when the game is only checking itself).
+		if (State.phase == TEXT("ended") && Room.IsValid()) { PushAt = 0; Room->PushState(State.ToValue(), DeviceView()); }
 		if (State.phase == TEXT("ended")) { if (bAutoPlay && TestFinale < 0) ShowEnd(); else ShowFinale(); return; }
 		if (State.phase != TEXT("actions"))
 		{
@@ -231,7 +293,24 @@ void UPortsGameFlow::Pump()
 			BotMoveAt = Now() + (bAutoPlay ? 0.05 : FPortsData::Get().Number(TEXT("bots.thinkSeconds")));
 			return;
 		}
-		if (P->pending.Num()) { OpenDecisionPrompt(); return; }
+		// A house whose player has left sits out: its cards get the cautious answer (offers are turned down, a wage
+		// law is obeyed) and its turn ends (skipLeftTurn in game.js).
+		if (HasLeft(P))
+		{
+			while (P && P->pending.Num() && HasLeft(P))
+			{
+				const int32 Waiting = P->pending.Num();
+				ApplyDecision(P->pending[0].Get(TEXT("kind")).AsString() == TEXT("wageLaw") ? EPortsChoice::Obey : EPortsChoice::No);
+				P = Ports::CurrentPlayer(State);
+				if (P && P->pending.Num() >= Waiting) break;
+			}
+			if (Steps.Num() || Root->HasDialog()) continue;
+			Notify(FString::Printf(TEXT("%s has left the game: their turn is skipped."), *P->name), 3.5f);
+			FinishTurn();
+			return;
+		}
+		// A card waiting for an answer: asked here, or answered on the player's own device.
+		if (P->pending.Num() && !Remote()) { OpenDecisionPrompt(); return; }
 		return;
 	}
 }
@@ -400,6 +479,14 @@ void UPortsGameFlow::BeginTurn()
 		LookAt(Own, 1.35);
 	}
 	if (P.bot || bAutoPlay) return;
+	if (Remote())
+	{
+		// Everyone has their own device: the turn simply begins.
+		Sound(TEXT("fanfare"));
+		StartClock();
+		PushToDevices();
+		return;
+	}
 	if (OnePerson())
 	{
 		Sound(TEXT("fanfare"));
@@ -462,7 +549,7 @@ void UPortsGameFlow::ExpireTurn()
 void UPortsGameFlow::StartAction(const FString& Id)
 {
 	const FPortsPlayer* P = Ports::CurrentPlayer(State);
-	if (!bInGame || !P || Busy() || P->bot) return;
+	if (!bInGame || !P || Busy() || P->bot || Remote()) return;
 	const FString Why = QuickBlock(Id, *P);
 	if (!Why.IsEmpty()) { Sound(TEXT("error")); Notify(Why); return; }
 	OpenActionPrompt(Id);
@@ -566,7 +653,7 @@ void UPortsGameFlow::ApplyDecision(EPortsChoice Choice)
 void UPortsGameFlow::TryEndTurn()
 {
 	const FPortsPlayer* P = Ports::CurrentPlayer(State);
-	if (!bInGame || !P || Busy() || P->bot) return;
+	if (!bInGame || !P || Busy() || P->bot || Remote()) return;
 	if (P->pending.Num()) { Notify(TEXT("Answer the card first.")); return; }
 	if (P->ap > 0) OpenEndTurnPrompt();
 	else FinishTurn();
@@ -637,6 +724,24 @@ void UPortsGameFlow::HandleKeys()
 void UPortsGameFlow::Tick(float DeltaSeconds)
 {
 	if (!Root.IsValid() || !Map) return;
+	if (MenuDueIn > 0 && --MenuDueIn == 0 && !bInGame && !SetupForm.IsValid() && !Finale.IsValid()) ShowMenu();
+	TestScriptTick();
+	if (LobbyRoom.IsValid()) { LobbyRoom->Tick(FPlatformTime::Seconds()); TestLobbyPlay(); }
+	if (Room.IsValid())
+	{
+		Room->Tick(FPlatformTime::Seconds());
+		// For checking the game: -PortsNetDropAt=20 cuts the connection that many seconds into the game.
+		if (TestDropAt < 0) { float At = 0; TestDropAt = FParse::Value(FCommandLine::Get(), TEXT("PortsNetDropAt="), At) ? Now() + At : 0; }
+		if (TestDropAt > 0 && bInGame && Now() >= TestDropAt) { TestDropAt = 0; Room->TestDrop(); }
+		// The devices' clocks follow this one: they are told whenever it stops or starts.
+		const bool bHold = bInGame && (Root->HasStoryDialog() || Map->IsAnimating() || Steps.Num() > 0);
+		if (bHold != bLastHold) { bLastHold = bHold; PushToDevices(); }
+		if (PushAt > 0 && FPlatformTime::Seconds() >= PushAt)
+		{
+			PushAt = 0;
+			if (bInGame || State.phase == TEXT("ended")) Room->PushState(State.ToValue(), DeviceView());
+		}
+	}
 	TickAudio(DeltaSeconds);
 	HandleKeys();
 	if (Finale.IsValid()) { FinaleTick(DeltaSeconds); return; }

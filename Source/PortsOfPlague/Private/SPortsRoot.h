@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Widgets/SCompoundWidget.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SLeafWidget.h"
 
 class APlayerController;
@@ -30,9 +31,16 @@ struct FPortsDialogOptions
 	bool bStory = false;
 	// Closes by itself after this many seconds, if above zero.
 	float AutoClose = 0.f;
+	// On a big screen nobody can scroll: a card too tall for the page is made just small enough to show
+	// all of it (fitDialog in game.js), down to 0.45 of its size.
+	bool bFit = false;
 
-	// How wide the inside of the card is, in pixels (dialog in game.css: 780, 1000 when wide, 560 at the side).
-	float FrameWidth() const { return bSide ? 560.f : bWide ? 1000.f : 780.f; }
+	// The big screen of a multi-device game, read from across a room: its cards are wider.
+	bool bBig = false;
+
+	// How wide the inside of the card is, in pixels (dialog in game.css: 780, 1000 when wide, 560 at the side;
+	// 1000 and 1200 on a big screen).
+	float FrameWidth() const { return bSide ? 560.f : bBig ? (bWide ? 1200.f : 1000.f) : bWide ? 1000.f : 780.f; }
 	float InnerWidth() const { return FrameWidth() - 58.f - 14.f; }
 };
 
@@ -72,6 +80,8 @@ public:
 	void SetScreen(const TSharedRef<SWidget>& Screen);
 	// A widget of the screen that covers part of the map (so clicks on it are not clicks on the map).
 	void MarkSolid(const TSharedRef<SWidget>& Widget) { Solid.Add(Widget); }
+	// For checking the game: scrolls the top card to its foot.
+	void ScrollTopToEnd() { if (Dialogs.Num() && Dialogs.Last().Scroll.IsValid()) Dialogs.Last().Scroll->ScrollToEnd(); }
 	// For checking the game: writes to the log whether a newly shown page keeps the size it first had,
 	// or changes it a moment later (which is seen as a jump).
 	void Watch(const TSharedRef<SWidget>& Widget, const FString& Name) { Watched.Add({ Widget, Name }); }
@@ -92,6 +102,8 @@ public:
 	void Toast(const FString& Text, float Seconds = 3.2f);
 	bool IsPointerOverUi() const;
 	float ViewHeight() const;
+	// How much of the screen the page's layout scale takes for one of its pixels.
+	float LayoutScale() const { return FMath::Max(0.1f, GetCachedGeometry().Scale); }
 
 private:
 	struct FDialog
@@ -99,6 +111,7 @@ private:
 		int32 Id = 0;
 		TSharedPtr<SWidget> Widget;
 		TSharedPtr<SWidget> Frame;
+		TSharedPtr<class SScrollBox> Scroll;
 		FPortsDialogOptions Options;
 		FPortsClose OnClose;
 	};

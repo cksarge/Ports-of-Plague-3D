@@ -6,6 +6,7 @@
 
 #include "PortsCameraPawn.h"
 #include "PortsMapActor.h"
+#include "PortsNet.h"
 #include "GameFramework/PlayerController.h"
 #include "PortsUi.h"
 #include "SPortsRoot.h"
@@ -37,6 +38,9 @@ struct FPortsSetupForm
 	bool timer = true;
 	TArray<FPortsSetupPlayer> players;
 	FString error;
+	// Everyone on their own device: this screen opens a room and becomes the big screen.
+	bool bDevices = false;
+	FString roomError;
 };
 
 namespace
@@ -217,6 +221,9 @@ void UPortsGameFlow::ShowMenu()
 	bInGame = false;
 	bResults = false;
 	bPlagueCard = false;
+	CloseLobbyRoom();
+	if (Room.IsValid()) { Room->Close(); Room.Reset(); }
+	Ui.roomCode.Reset();
 	if (Map) Map->ClearState();
 	SetSidePanel(Map, false);
 	FPortsState Saved;
@@ -248,12 +255,87 @@ void UPortsGameFlow::ShowMenu()
 			+ SHorizontalBox::Slot().FillWidth(1)[ SNew(SSpacer) ];
 	}, FMargin(0, 6));
 	Doc.Add(SNew(SBox).HAlign(HAlign_Center)[ Wide(Buttons.Build(380), 380) ]);
+	// .menu-foot: who can play, and for how long (the website's line; this version is played with a mouse or keyboard).
+	if (FPortsData::Get().IsLoaded())
+	{
+		const auto ToFive = [](int32 Minutes) { return FMath::RoundToInt32(Minutes / 5.0) * 5; };
+		Doc.Text(FString::Printf(TEXT("1–%d players (bots can play any house) on one device or each on their own · about %d–%d minutes · mouse or keyboard"),
+			Cfg(TEXT("players.max")), ToFive(Cfg(TEXT("timeEstimates.quick.2"))), ToFive(Cfg(TEXT("timeEstimates.standard.6")))), TEXT("Ports.Small"), ETextJustify::Center, FMargin(0, 16, 0, 0));
+	}
 	Doc.Space(8);
 	const TSharedRef<SWidget> Built = Doc.Build(740 - 58);
 	Root->SetScreen(Page(Built, 740, TEXT("bg_title_veil"), false, Root, true));
 }
 
 // ---------- New game ----------
+
+// Opens a room for the new-game screen's lobby; the screen redraws as players join and leave.
+void UPortsGameFlow::OpenLobbyRoom()
+{
+	if (LobbyRoom.IsValid() || !SetupForm.IsValid()) return;
+	if (!FPortsTransport::IsAvailable())
+	{
+		SetupForm->roomError = TEXT("Multi-device play is not set up on this copy of the game yet.");
+		return;
+	}
+	LobbyRoom = MakeShared<FPortsRoom>();
+	TWeakObjectPtr<UPortsGameFlow> Weak(this);
+	LobbyRoom->OnChange = [Weak]() { if (Weak.IsValid() && Weak->SetupForm.IsValid() && Weak->SetupForm->bDevices && Weak->SetupHolder.IsValid()) Weak->ShowSetup(); };
+	// For checking the game: -PortsRoomCode=XXXX asks for one particular code.
+	FString AskFor;
+	FParse::Value(FCommandLine::Get(), TEXT("PortsRoomCode="), AskFor);
+	LobbyRoom->Open(AskFor, TArray<FPortsSeat>(), false, [Weak](bool bOk)
+	{
+		if (!Weak.IsValid() || !Weak->SetupForm.IsValid()) return;
+		if (!bOk)
+		{
+			Weak->SetupForm->roomError = TEXT("Could not open a room. Check the internet connection and try again.");
+			Weak->LobbyRoom.Reset();
+		}
+		if (Weak->SetupForm->bDevices && Weak->SetupHolder.IsValid()) Weak->ShowSetup();
+	});
+}
+
+// For checking multi-device play without a hand on this screen: as soon as enough devices have joined the lobby,
+// a bot is added and a Quick game without pre-plague rounds starts. The spec can ask otherwise:
+// "lobbyplay4" waits for four devices, and "nobot", "standard", "mortality", "pre" and "timer" change the game.
+void UPortsGameFlow::TestLobbyPlay()
+{
+	if (!bTestLobbyPlay || !LobbyRoom.IsValid() || !LobbyRoom->bReady || LobbyRoom->Seats.Num() < TestLobbyHumans) return;
+	bTestLobbyPlay = false;
+	if (!TestLobbySpec.Contains(TEXT("nobot")) && LobbyRoom->Seats.Num() < 6)
+	{
+		FString Home;
+		for (const FString& H : FPortsData::Get().HomeCities) if (!LobbyRoom->Seats.ContainsByPredicate([&H](const FPortsSeat& S) { return S.home == H; })) { Home = H; break; }
+		LobbyRoom->AddBot(TEXT("House of the Lion"), Home, TEXT("medium"));
+	}
+	FPortsSetup Setup;
+	for (int32 i = 0; i < LobbyRoom->Seats.Num(); i++)
+	{
+		const FPortsSeat& S = LobbyRoom->Seats[i];
+		FPortsSetupPlayer P;
+		P.name = S.name; P.home = S.home; P.bot = S.bot; P.skill = S.skill.IsEmpty() ? FString(TEXT("medium")) : S.skill;
+		P.color = Ports::PLAYER_STYLES[i].color; P.colorName = Ports::PLAYER_STYLES[i].colorName; P.crest = Ports::PLAYER_STYLES[i].crest;
+		Setup.players.Add(P);
+	}
+	Setup.mode = TestLobbySpec.Contains(TEXT("standard")) ? TEXT("standard") : TEXT("quick");
+	Setup.difficulty = TestLobbySpec.Contains(TEXT("mortality")) ? TEXT("mortality") : TEXT("chronicler");
+	Setup.prePlague = TestLobbySpec.Contains(TEXT("pre"));
+	Setup.timer = bTestLobbyTimer;
+	Setup.seed = TEXT("test-") + TestLobbySpec;
+	Room = LobbyRoom;
+	LobbyRoom.Reset();
+	Room->bStarted = true;
+	AdoptRoom();
+	SetupForm->bDevices = false;
+	BeginGame(Setup, false);
+}
+
+void UPortsGameFlow::CloseLobbyRoom()
+{
+	if (LobbyRoom.IsValid()) LobbyRoom->Close();
+	LobbyRoom.Reset();
+}
 
 void UPortsGameFlow::ShowSetup()
 {
@@ -284,7 +366,104 @@ void UPortsGameFlow::ShowSetup()
 	FPortsDoc Doc;
 	Doc.Width(InnerWidth);
 	Doc.H1(TEXT("New Game"));
-	Doc.Label(TEXT("Number of houses"));
+	// A finished game's room is closed once a new game is being set up.
+	if (Room.IsValid() && !bInGame) { Room->Close(); Room.Reset(); }
+	const bool bDevices = Form->bDevices;
+	Doc.Label(TEXT("Play on"));
+	Doc.Row({ Seg(TEXT("This device only"), !bDevices, [this, Form, Redraw]() { Form->bDevices = false; CloseLobbyRoom(); Redraw(); }),
+		Seg(TEXT("Everyone on their own device"), bDevices, [this, Form, Redraw]() { Form->bDevices = true; Form->roomError.Reset(); OpenLobbyRoom(); Redraw(); }) }, 7);
+	Doc.Small(bDevices ? TEXT("This screen shows the map for everyone. Each player joins on a phone, tablet or computer with the room code and takes their turn there.") : TEXT("Players take turns on this device and pass it on."));
+	Doc.Space(6);
+	const TArray<FPortsSeat> NoSeats;
+	const TArray<FPortsSeat>& LobbySeats = LobbyRoom.IsValid() ? LobbyRoom->Seats : NoSeats;
+	if (bDevices)
+	{
+		// What players waiting in the lobby are told about the game.
+		if (LobbyRoom.IsValid())
+		{
+			const V Options = V::Object({ { TEXT("mode"), V(Form->mode) }, { TEXT("difficulty"), V(Form->difficulty) }, { TEXT("prePlague"), Form->prePlague }, { TEXT("timer"), Form->timer } });
+			if (Options.ToJson() != LobbyRoom->Options.ToJson()) { LobbyRoom->Options = Options; LobbyRoom->PushLobby(); }
+		}
+		if (!Form->roomError.IsEmpty())
+		{
+			Doc.P(FString::Printf(TEXT("<risk>%s</>"), *Esc(Form->roomError)));
+			if (FPortsTransport::IsAvailable()) Doc.Row({ PortsUi::Button(TEXT("Try again"), [this, Form, Redraw]() { Form->roomError.Reset(); OpenLobbyRoom(); Redraw(); }, EButton::Small) }, 7);
+		}
+		else if (!LobbyRoom.IsValid() || !LobbyRoom->bReady) Doc.P(TEXT("Opening a room…"));
+		else
+		{
+			// .room-code-box: where to join, and the code, large enough to read across a room.
+			FPortsBoxLook CodeBox;
+			CodeBox.Top = Color(TEXT("#8f1a12")); CodeBox.Bottom = Color(TEXT("#5c0d09"));
+			CodeBox.Radius = 12;
+			CodeBox.Border = Color(TEXT("#d9a82b")); CodeBox.BorderWidth = 3;
+			Doc.Add(PortsUi::Box(CodeBox, SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)[ Rich(FString::Printf(TEXT("<roomat>Join at </><roomaddr>%s</><roomat> → </><roomem>Join a game</>"), *Esc(FPortsTransport::JoinAddress())), TEXT("Ports.Body"), ETextJustify::Left, false) ]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[ Rich(FString::Printf(TEXT("<roomcode>%s</>"), *Esc(LobbyRoom->Code)), TEXT("Ports.Body"), ETextJustify::Right, false) ], FMargin(18, 10)), FMargin(0, 6));
+			Doc.H3(FString::Printf(TEXT("Houses (%d of %d)"), LobbySeats.Num(), Cfg(TEXT("players.max"))));
+			if (LobbySeats.Num() == 0) Doc.Small(TEXT("Waiting for players… Each player opens the game on their own device, chooses <i>Join a game</i> and types the code."));
+			const int32 SeatColumns = FMath::Clamp(LobbySeats.Num(), 1, 3);
+			const float SeatWidth = (InnerWidth - 16.f * (SeatColumns - 1)) / SeatColumns;
+			TArray<TSharedRef<SWidget>> SeatCards;
+			const V& AllSkills = Config.Get(TEXT("bots")).Get(TEXT("skills"));
+			for (int32 i = 0; i < LobbySeats.Num(); i++)
+			{
+				const FPortsSeat& S = LobbySeats[i];
+				const FPortsPlayerStyle& Style = Ports::PLAYER_STYLES[i];
+				const FLinearColor House = Color(Style.color);
+				FPortsDoc Card;
+				Card.Width(SeatWidth - 34);
+				// The house's crest and name, and whether its device is connected (.link-dot): green when it is.
+				Card.Add(SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 9, 0)[ PortsUi::Crest(Style.color, Style.crest, 26) ]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[ Rich(FString::Printf(TEXT("<capsb>%s</>%s"), *Esc(S.name), S.bot ? TEXT("  <small>Bot</>") : TEXT("")), TEXT("Ports.Body"), ETextJustify::Left, false) ]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+					[
+						S.bot ? StaticCastSharedRef<SWidget>(SNew(SSpacer)) : StaticCastSharedRef<SWidget>(SNew(SBox).WidthOverride(11).HeightOverride(11)[ PortsUi::Box(PortsUi::PlainLook(Color(S.online ? TEXT("#2e9d5b") : TEXT("#b9ad92")), 5.5f, FLinearColor(0, 0, 0, 0.3f), 1), SNew(SSpacer)) ])
+					]);
+				Card.Small(FString::Printf(TEXT("%s · %s"), *Esc(CityName(S.home)), *Esc(Style.colorName)));
+				if (S.bot)
+				{
+					Card.Label(TEXT("Bot skill"));
+					TArray<TSharedRef<SWidget>> Skills;
+					for (int32 k = 0; k < AllSkills.GetKeys().Num(); k++)
+					{
+						const FString Key = AllSkills.GetKeys()[k];
+						Skills.Add(Seg(Esc(AllSkills.ValueAt(k).Get(TEXT("label")).AsString()), S.skill == Key, [this, i, Key]() { if (LobbyRoom.IsValid()) LobbyRoom->SetSkill(i, Key); }));
+					}
+					Card.Row(Skills, 7);
+					Card.Small(Esc(AllSkills.Get(S.skill).Get(TEXT("description")).AsString()));
+				}
+				Card.Row({ PortsUi::Button(TEXT("Remove"), [this, i]() { if (LobbyRoom.IsValid()) LobbyRoom->RemoveSeat(i); }, EButton::Ghost) }, 7);
+				FPortsBoxLook CardLook = PortsUi::PlainLook(Color(TEXT("#fffaf0")), 12, House, 3);
+				CardLook.TopBar = House;
+				CardLook.TopBarHeight = 9;
+				SeatCards.Add(SNew(SBox).WidthOverride(SeatWidth)[ PortsUi::Box(CardLook, Card.Build(SeatWidth - 34), FMargin(17, 20, 17, 14)) ]);
+			}
+			for (int32 First = 0; First < SeatCards.Num(); First += SeatColumns)
+			{
+				const TSharedRef<SHorizontalBox> Line = SNew(SHorizontalBox);
+				for (int32 k = First; k < FMath::Min(SeatCards.Num(), First + SeatColumns); k++) Line->AddSlot().AutoWidth().Padding(k == First ? 0 : 16, 0, 0, 0)[ SeatCards[k] ];
+				Doc.Add(Line, FMargin(0, 8));
+			}
+			if (LobbySeats.Num() < Cfg(TEXT("players.max")))
+			{
+				Doc.Add(SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[ PortsUi::Button(TEXT("+ Add a bot"), [this]()
+					{
+						if (!LobbyRoom.IsValid()) return;
+						static const TCHAR* Names[] = { TEXT("House of the Anchor"), TEXT("House of the Lion"), TEXT("House of the Rose"), TEXT("House of the Star"), TEXT("House of the Ship"), TEXT("House of the Sun") };
+						FString Home, Name;
+						for (const FString& H : FPortsData::Get().HomeCities) if (!LobbyRoom->Seats.ContainsByPredicate([&H](const FPortsSeat& S) { return S.home == H; })) { Home = H; break; }
+						for (const TCHAR* N : Names) if (!LobbyRoom->Seats.ContainsByPredicate([N](const FPortsSeat& S) { return S.name == N; })) { Name = N; break; }
+						if (Name.IsEmpty()) Name = FString::Printf(TEXT("Bot %d"), LobbyRoom->Seats.Num() + 1);
+						LobbyRoom->AddBot(Name, Home, TEXT("medium"));
+					}, EButton::Small) ]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10, 0, 0, 0)[ Rich(TEXT("A computer house, played on this screen."), TEXT("Ports.Small"), ETextJustify::Left, false) ], FMargin(0, 6));
+			}
+		}
+	}
+	if (!bDevices) Doc.Label(TEXT("Number of houses"));
 	TArray<TSharedRef<SWidget>> Row;
 	for (int32 N = Cfg(TEXT("players.min")); N <= Cfg(TEXT("players.max")); N++)
 	{
@@ -304,15 +483,18 @@ void UPortsGameFlow::ShowSetup()
 			Redraw();
 		}));
 	}
-	Doc.Row(Row, 7);
-	Doc.Small(TEXT("Any house can be played by a bot, so you can also play alone."));
-	Doc.Space(10);
+	if (!bDevices)
+	{
+		Doc.Row(Row, 7);
+		Doc.Small(TEXT("Any house can be played by a bot, so you can also play alone."));
+		Doc.Space(10);
+	}
 
 	// At most three houses to a row, as on the website.
 	const int32 Columns = FMath::Min(Form->count, 3);
 	const float CardWidth = (InnerWidth - 16.f * (Columns - 1)) / Columns;
 	TArray<TSharedRef<SWidget>> Cards;
-	for (int32 i = 0; i < Form->count; i++)
+	for (int32 i = 0; i < (bDevices ? 0 : Form->count); i++)
 	{
 		FPortsSetupPlayer& P = Form->players[i];
 		const FLinearColor House = Color(*P.color);
@@ -408,7 +590,8 @@ void UPortsGameFlow::ShowSetup()
 
 	// Game length and difficulty, side by side.
 	const int32 PreRounds = Cfg(*(TEXT("prePlague.rounds.") + Form->mode));
-	int32 Estimate = Cfg(*FString::Printf(TEXT("timeEstimates.%s.%d"), *Form->mode, Form->count));
+	const int32 Houses = bDevices ? FMath::Max(LobbySeats.Num(), Cfg(TEXT("players.min"))) : Form->count;
+	int32 Estimate = Cfg(*FString::Printf(TEXT("timeEstimates.%s.%d"), *Form->mode, Houses));
 	const int32 FullEstimate = Estimate;
 	// The estimates in config.json assume the default options (pre-plague rounds and the timer on).
 	if (!Form->prePlague) Estimate -= FMath::RoundToInt32(Estimate * static_cast<double>(PreRounds) / (PreRounds + static_cast<double>(Cfg(TEXT("rounds"))) / Cfg(*(TEXT("modes.") + Form->mode + TEXT(".span")))));
@@ -425,7 +608,7 @@ void UPortsGameFlow::ShowSetup()
 	Length.Row(Row, 7);
 	Length.Small(FString::Printf(TEXT("%s %d action points per turn."), *Esc(Modes.Get(Form->mode).Get(TEXT("description")).AsString()), Cfg(*(TEXT("modes.") + Form->mode + TEXT(".actionPoints")))));
 	Length.Add(SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot().AutoWidth()[ PortsUi::Box(PortsUi::PlainLook(Color(TEXT("#efe2bf")), 13), Rich(FString::Printf(TEXT("About %d minutes for %d players%s"), Estimate, Form->count, Form->timer ? TEXT("") : TEXT(" (longer without the turn timer)")), TEXT("Ports.Small"), ETextJustify::Left, false), FMargin(10, 2)) ]
+		+ SHorizontalBox::Slot().AutoWidth()[ PortsUi::Box(PortsUi::PlainLook(Color(TEXT("#efe2bf")), 13), Rich(FString::Printf(TEXT("About %d minutes for %d players%s"), Estimate, Houses, Form->timer ? TEXT("") : TEXT(" (longer without the turn timer)")), TEXT("Ports.Small"), ETextJustify::Left, false), FMargin(10, 2)) ]
 		+ SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center).Padding(8, 0, 0, 0)[ Rich(FullEstimate > 60 && Form->mode == TEXT("standard") ? TEXT("· Quick Play is recommended for this many players.") : TEXT(""), TEXT("Ports.Small"), ETextJustify::Left, false) ]);
 	FPortsDoc Difficulty;
 	Difficulty.Width(InnerWidth / 2 - 8);
@@ -498,7 +681,26 @@ void UPortsGameFlow::ShowSetup()
 			PortsUi::Button(TEXT("Roll for turn order →"), [this, Form, Redraw]()
 			{
 				FPortsSetup Setup;
-				for (int32 i = 0; i < Form->count; i++)
+				if (Form->bDevices)
+				{
+					// The houses are the room's seats, in the order they joined; each takes the next colour and crest.
+					if (!LobbyRoom.IsValid() || !LobbyRoom->bReady) { Form->error = TEXT("The room is not open yet."); Redraw(); return; }
+					for (int32 i = 0; i < LobbyRoom->Seats.Num(); i++)
+					{
+						const FPortsSeat& S = LobbyRoom->Seats[i];
+						FPortsSetupPlayer P;
+						P.name = S.name; P.home = S.home; P.bot = S.bot; P.skill = S.skill.IsEmpty() ? FString(TEXT("medium")) : S.skill;
+						P.color = Ports::PLAYER_STYLES[i].color; P.colorName = Ports::PLAYER_STYLES[i].colorName; P.crest = Ports::PLAYER_STYLES[i].crest;
+						Setup.players.Add(P);
+					}
+					if (Setup.players.Num() < Cfg(TEXT("players.min")))
+					{
+						Form->error = FString::Printf(TEXT("At least %d houses are needed: wait for players to join, or add a bot."), Cfg(TEXT("players.min")));
+						Redraw();
+						return;
+					}
+				}
+				else for (int32 i = 0; i < Form->count; i++)
 				{
 					FPortsSetupPlayer P = Form->players[i];
 					P.name = P.name.TrimStartAndEnd();
@@ -511,6 +713,15 @@ void UPortsGameFlow::ShowSetup()
 				Setup.prePlague = Form->prePlague;
 				Setup.timer = Form->timer;
 				Setup.seed = FString::Printf(TEXT("%lld-%f"), FDateTime::UtcNow().ToUnixTimestamp() * 1000 + FDateTime::UtcNow().GetMillisecond(), FMath::FRand());
+				if (Form->bDevices)
+				{
+					// The lobby's room becomes the game's room.
+					Room = LobbyRoom;
+					LobbyRoom.Reset();
+					Room->bStarted = true;
+					AdoptRoom();
+					Form->bDevices = false;
+				}
 				BeginGame(Setup, Form->hints || Form->difficulty == TEXT("apprentice"));
 			}, EButton::Primary)
 		]);
@@ -538,7 +749,60 @@ void UPortsGameFlow::BeginGame(const FPortsSetup& Setup, bool bHints)
 void UPortsGameFlow::ContinueSaved()
 {
 	if (!LoadSaved(State, Ui)) { Notify(TEXT("The saved game could not be opened.")); return; }
+	// A saved multi-device game reopens its room, so the players' devices can rejoin.
+	if (!Ui.roomCode.IsEmpty()) { ReopenRoom(); return; }
 	EnterGame();
+}
+
+// The game's room, once it has one: seats coming and going are saved and shown, and requests from devices are played.
+void UPortsGameFlow::AdoptRoom()
+{
+	Room->OnChange = [this]()
+	{
+		if (!bInGame) return;
+		Save();
+		Refresh();
+		// A house that has just left during its own turn is skipped as soon as nothing else is going on.
+		Pump();
+	};
+	Room->OnIntent = [this](const V& Message) { HandleIntent(Message); };
+}
+
+void UPortsGameFlow::ReopenRoom()
+{
+	const auto Message = [this](const FString& Title, const FString& Text, bool bButtons)
+	{
+		FPortsDoc Doc;
+		Doc.H1(Title);
+		Doc.P(Text);
+		if (bButtons)
+		{
+			Doc.Space(8);
+			Doc.Add(SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth()[ PortsUi::Button(TEXT("← Menu"), [this]() { ShowMenu(); }, EButton::Ghost) ]
+				+ SHorizontalBox::Slot().FillWidth(1)[ SNew(SSpacer) ]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[ PortsUi::Button(TEXT("Play on this device"), [this]() { Ui.roomCode.Reset(); EnterGame(); }) ]
+				+ SHorizontalBox::Slot().AutoWidth()[ PortsUi::Button(TEXT("Try again"), [this]() { ReopenRoom(); }, EButton::Primary) ]);
+		}
+		Root->SetScreen(Page(Doc.Build(700 - 58), 700, TEXT("bg_wood"), true, Root, true));
+	};
+	Message(FString::Printf(TEXT("Room %s"), *Ui.roomCode), TEXT("Reopening the room for the players’ devices…"), false);
+	const auto Failed = [Message]() { Message(TEXT("Could not reopen the room"), TEXT("Check the internet connection. You can also finish this game on this device only."), true); };
+	if (!FPortsTransport::IsAvailable()) { Failed(); return; }
+	const TSharedRef<FPortsRoom> Opening = MakeShared<FPortsRoom>();
+	LobbyRoom = Opening;
+	TWeakObjectPtr<UPortsGameFlow> Weak(this);
+	Opening->Open(Ui.roomCode, FPortsRoom::SeatsFromValue(Ui.roomSeats), true, [Weak, Failed](bool bOk)
+	{
+		if (!Weak.IsValid() || !Weak->LobbyRoom.IsValid()) return;
+		if (!bOk) { Weak->LobbyRoom.Reset(); Failed(); return; }
+		// If another big screen had taken the old code, the room has a new one, shown on the side panel.
+		Weak->Room = Weak->LobbyRoom;
+		Weak->LobbyRoom.Reset();
+		Weak->Ui.roomCode = Weak->Room->Code;
+		Weak->AdoptRoom();
+		Weak->EnterGame();
+	});
 }
 
 void UPortsGameFlow::EnterGame()
@@ -557,6 +821,7 @@ void UPortsGameFlow::EnterGame()
 	Root->SetScreen(BuildGameScreen());
 	SetSidePanel(Map, true);
 	Refresh();
+	PushToDevices();
 	Pump();
 }
 
@@ -586,7 +851,7 @@ TSharedRef<SWidget> UPortsGameFlow::BuildGameScreen()
 			+ SOverlay::Slot()[ SNew(SImage).Image(PortsUi::PictureBrush(TEXT("bg_wood"))) ]
 			+ SOverlay::Slot()
 			[
-				SNew(SScrollBox).ExternalScrollbar(SideBar)
+				SAssignNew(SideScroll, SScrollBox).ExternalScrollbar(SideBar)
 				+ SScrollBox::Slot().Padding(FMargin(SidePad, 13, SidePad, 16))[ SAssignNew(SidebarSlot, SBox) ]
 			]
 			+ SOverlay::Slot().HAlign(HAlign_Right)[ SideBar ]
@@ -795,16 +1060,57 @@ TSharedRef<SWidget> UPortsGameFlow::BuildTopBar()
 		+ SVerticalBox::Slot().AutoHeight()[ PortsUi::Box(PortsUi::PlainLook(Color(TEXT("#d9a82b")), 0), SNew(SBox).HeightOverride(3)) ];
 }
 
+// The big screen of a multi-device game: the side panel always fits, with nothing to scroll (fitScreen in
+// game.js). It first leaves out the oldest chronicle lines, then the chronicle, then the historical note,
+// and only then shrinks.
 TSharedRef<SWidget> UPortsGameFlow::BuildSidebar()
+{
+	if (!Remote() || !SideScroll.IsValid()) return BuildSidebarWith(10, true, 1.f);
+	const float Seen = SideScroll->GetCachedGeometry().GetLocalSize().Y;
+	const float Space = (Seen > 100.f ? Seen : Root->ViewHeight() - 56.f) - 13.f - 16.f;
+	const float Scale = Root->LayoutScale();
+	TSharedPtr<SWidget> Built;
+	float Tall = 0;
+	const int32 Lines[] = { 10, 8, 6, 4, 3, 2, 0, -1 };
+	for (const int32 Count : Lines)
+	{
+		Built = BuildSidebarWith(FMath::Max(0, Count), Count >= 0, 1.f);
+		Built->SlatePrepass(Scale);
+		Tall = Built->GetDesiredSize().Y;
+		if (Tall <= Space) return Built.ToSharedRef();
+	}
+	const float Zoom = FMath::Clamp(Space / FMath::Max(1.f, Tall), 0.55f, 1.f);
+	return SNew(SPortsZoom).Zoom(Zoom)[ BuildSidebarWith(0, false, Zoom) ];
+}
+
+TSharedRef<SWidget> UPortsGameFlow::BuildSidebarWith(int32 LogLines, bool bNote, float Zoom)
 {
 	FPortsDoc Doc;
 	const auto Gap = FMargin(0, 0, 0, 13);
 	const FPortsPlayer* P = Ports::CurrentPlayer(State);
 	const V& Skills = Data().Config().Get(TEXT("bots")).Get(TEXT("skills"));
+	if (Remote())
+	{
+		// .room-chip: the room code stays in view all game, so a device that dropped out can find its way back.
+		FPortsBoxLook Chip;
+		Chip.Top = Color(TEXT("#8f1a12")); Chip.Bottom = Color(TEXT("#5c0d09"));
+		Chip.Radius = 12;
+		Chip.Border = Color(TEXT("#d9a82b")); Chip.BorderWidth = 2;
+		Doc.Add(PortsUi::Box(Chip, Rich(FString::Printf(TEXT("<chip>Room </><chipcode>%s</><chipat>  · join at %s</>"), *Esc(Room->Code), *Esc(FPortsTransport::JoinAddress())), TEXT("Ports.Body"), ETextJustify::Left, false), FMargin(13, 5)), Gap);
+	}
 	if (P)
 	{
 		AddHousePanel(Doc, *P);
-		if (!P->bot)
+		if (!P->bot && Remote())
+		{
+			const FPortsSeat* Seat = Room->Seats.IsValidIndex(P->id) ? &Room->Seats[P->id] : nullptr;
+			FPortsDoc Wait;
+			if (Seat && Seat->left) Wait.P(FString::Printf(TEXT("<b>%s</> has left the game. Their turn is skipped."), *Esc(P->name)));
+			else Wait.P(FString::Printf(TEXT("<b>%s</> is choosing on their own device."), *Esc(P->name)));
+			if (Seat && !Seat->online && !Seat->left) Wait.P(FString::Printf(TEXT("<risk>This device is not connected. Open %s and join room </><b>%s</><risk> with the house name “%s”.</>"), *Esc(FPortsTransport::JoinAddress()), *Esc(Room->Code), *Esc(P->name)));
+			Doc.Panel(TEXT("Actions"), Color(TEXT("#1d4a86")), Wait, Gap);
+		}
+		else if (!P->bot)
 		{
 			const FString Hint = HintFor(*P);
 			// .hint in game.css: pale blue with a blue edge.
@@ -826,10 +1132,10 @@ TSharedRef<SWidget> UPortsGameFlow::BuildSidebar()
 	else
 	{
 		FPortsDoc Wait;
-		Wait.P(TEXT("Read the cards as they appear. Players take turns in the order rolled at the start."));
+		Wait.P(Remote() ? TEXT("Read the cards as they appear. Anyone can press Next on their device. Players take turns in the order rolled at the start.") : TEXT("Read the cards as they appear. Players take turns in the order rolled at the start."));
 		Doc.Panel(State.phase == TEXT("plague") ? TEXT("The plague takes its toll") : TEXT("The chronicle unfolds"), Color(TEXT("#7a1410")), Wait, Gap);
 	}
-	if (Ui.lastNote.Num())
+	if (Ui.lastNote.Num() && bNote)
 	{
 		FPortsDoc Note;
 		for (const FString& Id : Ui.lastNote) Note.Fact(Id);
@@ -839,7 +1145,10 @@ TSharedRef<SWidget> UPortsGameFlow::BuildSidebar()
 	for (int32 i = 0; i < State.order.Num(); i++)
 	{
 		const FPortsPlayer& H = State.players[State.order[i]];
-		const FString Tag = H.bot ? FString::Printf(TEXT("  <small>Bot · %s</>"), *Esc(Skills.Get(H.skill).Get(TEXT("label")).AsString())) : FString();
+		const FPortsSeat* HSeat = Remote() && Room->Seats.IsValidIndex(H.id) ? &Room->Seats[H.id] : nullptr;
+		// A bot is marked as one; on several devices a house shows whether its device is connected (green) or not, or that it has left.
+		const FString Tag = H.bot ? FString::Printf(TEXT("  <small>Bot · %s</>"), *Esc(Skills.Get(H.skill).Get(TEXT("label")).AsString()))
+			: !HSeat ? FString() : HSeat->left ? FString(TEXT("  <small>(left)</>")) : HSeat->online ? FString(TEXT("  <doton>\u25CF</>")) : FString(TEXT("  <dotoff>\u25CF</>"));
 		const FString Name = FString::Printf(TEXT("<sb>%d. %s</>%s"), i + 1, *Esc(H.name), *Tag);
 		const FString Numbers = FString::Printf(TEXT("%dƒ · rep %d · family %d · %d post%s"), H.florins, H.reputation, Ports::FamilyTotal(H), H.posts.Num(), H.posts.Num() > 1 ? TEXT("s") : TEXT(""));
 		const FString Total = FString::Printf(TEXT("<b>%d</>"), Ports::ScorePlayer(H).total);
@@ -868,7 +1177,7 @@ TSharedRef<SWidget> UPortsGameFlow::BuildSidebar()
 	Doc.Panel(TEXT("Houses (turn order)"), Color(TEXT("#5b2a86")), Houses, Gap);
 	FPortsDoc Log;
 	TArray<FString> Lines;
-	for (int32 i = State.log.Num() - 1; i >= 0 && Lines.Num() < 10; i--)
+	for (int32 i = State.log.Num() - 1; i >= 0 && Lines.Num() < LogLines; i--)
 	{
 		const V& E = State.log[i];
 		if (!E.Get(TEXT("text")).Truthy() || E.Get(TEXT("type")).AsString() == TEXT("turn") || E.Get(TEXT("seq")).AsInt() > Ui.seenSeq) continue;
@@ -885,8 +1194,9 @@ TSharedRef<SWidget> UPortsGameFlow::BuildSidebar()
 				+ SHorizontalBox::Slot().FillWidth(1)[ Rich(Line, TEXT("Ports.Small"), ETextJustify::Left, true, W > 0.f ? FMath::Max(80.f, W - 28.f) : 0.f) ];
 		}, FMargin(0, 2));
 	}
-	Doc.Panel(TEXT("Chronicle"), Color(TEXT("#6b4a1f")), Log, Gap);
-	return Doc.Build(SideWidth - SidePad * 2);
+	if (LogLines > 0) Doc.Panel(TEXT("Chronicle"), Color(TEXT("#6b4a1f")), Log, Gap);
+	// Shrunk, the panel is laid out wider by as much, so it still fills its column.
+	return Doc.Build((SideWidth - SidePad * 2) / Zoom);
 }
 
 // ---------- Final scores ----------
@@ -1153,6 +1463,7 @@ void UPortsGameFlow::ShowCredits()
 		TEXT("<b>Fonts:</> EB Garamond, Cinzel and UnifrakturMaguntia, all under the SIL Open Font License."),
 		TEXT("<b>Sound effects:</> original, made by the game's own code; no outside recordings are used."),
 		TEXT("<b>Dice:</> the 3D dice are adapted from roll-a-die (© 2015 ukatama), under the MIT License."),
+		TEXT("<b>Playing on several devices:</> the big screen and the players' phones, tablets or computers talk through Supabase Realtime. Only house names, home cities and game moves are sent; nothing is stored and there are no accounts."),
 	});
 	Doc->H3(TEXT("Music"));
 	TArray<FString> Tracks;
@@ -1167,6 +1478,10 @@ void UPortsGameFlow::ShowCredits()
 	Doc->P(TEXT("The game deals with mass death and with the persecution of Jewish communities. It treats these seriously and without graphic detail, and it states plainly that the accusations against Jews were false and the violence unjust."));
 	Doc->H3(TEXT("License"));
 	Doc->P(TEXT("This work is open source and protected under the MIT License. Copyright © 2026 Carter K, Landon S, Valen H, and John-Paul T."));
+	// The notices Epic's licence asks for, word for word, at the very end.
+	Doc->H3(TEXT("Engine"));
+	Doc->P(TEXT("Ports of Plague uses Unreal® Engine. Unreal® is a trademark or registered trademark of Epic Games, Inc. in the United States of America and elsewhere."));
+	Doc->P(TEXT("Unreal® Engine, Copyright 1998 – 2026, Epic Games, Inc. All rights reserved."));
 	FPortsDialogOptions Opts;
 	Opts.EnterValue = TEXT("close");
 	Open([Doc, Opts](TFunction<void(const FString&)> Close)
@@ -1183,7 +1498,24 @@ void UPortsGameFlow::ShowCredits()
 // With "auto" every house is played by the computer and cards close by themselves.
 void UPortsGameFlow::StartTestGame(const FString& Spec)
 {
+	if (Spec == TEXT("credits")) { ShowCredits(); bTestScrollEnd = true; return; }
+	if (Spec != TEXT("menu") && Spec != TEXT("credits")) MenuDueIn = 0;
+	if (Spec == TEXT("continue")) { ContinueSaved(); return; }
 	if (Spec == TEXT("setup")) { ShowSetup(); return; }
+	// "lobbyplay": start as soon as one device has joined; "lobbyplay2": wait for two; "...timer": with the turn timer on.
+	if (Spec.StartsWith(TEXT("lobby")))
+	{
+		ShowSetup();
+		SetupForm->bDevices = true;
+		bTestLobbyPlay = Spec.StartsWith(TEXT("lobbyplay"));
+		TestLobbySpec = Spec;
+		TestLobbyHumans = 1;
+		for (int32 N = 2; N <= 6; N++) if (Spec.Contains(FString::FromInt(N))) TestLobbyHumans = N;
+		bTestLobbyTimer = Spec.Contains(TEXT("timer"));
+		OpenLobbyRoom();
+		ShowSetup();
+		return;
+	}
 	// "setupflip": the picture catches the first frame after a change; "setup3": the same screen at rest.
 	if (Spec == TEXT("setupflip")) { ShowSetup(); bTestFlip = true; return; }
 	if (Spec == TEXT("setup3")) { ShowSetup(); SetupForm->count = 3; SetupForm->players[1].bot = true; ShowSetup(); return; }
@@ -1223,6 +1555,8 @@ void UPortsGameFlow::StartTestGame(const FString& Spec)
 
 void UPortsGameFlow::TestBeforeShot()
 {
+	// For a picture of the foot of a long card.
+	if (bTestScrollEnd && Root.IsValid()) Root->ScrollTopToEnd();
 	if (!bTestFlip || !SetupForm.IsValid()) return;
 	SetupForm->count = 3;
 	SetupForm->players[1].bot = true;

@@ -25,6 +25,21 @@ namespace
 
 	TArray<FString> Ids(const V& List) { return List.ToStrings(); }
 
+	// plagueRound in stories.js: what every page of a round's plague results needs to know about the whole round.
+	V PlagueRound(const V& Group)
+	{
+		int32 Halves = 0;
+		bool bPre = true, bRolls = false, bDeaths = false;
+		for (const V& E : Group.GetItems())
+		{
+			const FString Type = E.Get(TEXT("type")).AsString();
+			if (Type == TEXT("plague")) { Halves++; if (!E.Get(TEXT("pre")).Truthy()) bPre = false; }
+			if (Type == TEXT("mortality")) bRolls = true;
+			if (E.Get(TEXT("deaths")).AsInt() > 0) bDeaths = true;
+		}
+		return V::Object({ { TEXT("halves"), Halves }, { TEXT("pre"), bPre }, { TEXT("rolls"), bRolls }, { TEXT("deaths"), bDeaths } });
+	}
+
 	FString PageOf(int32 Page, int32 Pages) { return Pages > 1 ? FString::Printf(TEXT(" <small>(%d of %d)</>"), Page, Pages) : FString(); }
 
 	FString YearOf(const FString& Label)
@@ -121,6 +136,9 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 	Opts.bDismissable = false;
 	Opts.bStory = true;
 	Opts.EnterValue = TEXT("ok");
+	// The big screen of a multi-device game: wider cards, shrunk to fit if they must be (body.big-screen in game.css).
+	Opts.bBig = Remote();
+	Opts.bFit = Remote();
 
 	if (Kind == TEXT("prologue"))
 	{
@@ -133,10 +151,13 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 			: FString(TEXT("The game begins in the second half of 1347, as Italian ships carry the sickness west."));
 		Text += State.mode == TEXT("quick") ? TEXT(" In Quick Play each round of the plague years is a year and a half.") : TEXT(" Each round is half a year.");
 		Text += TEXT(" The plague will reach each city on the map when it really did, unless your ships bring it sooner.");
+		// On a big screen the story and the "how to play" box can be two cards (part: "story", then "how").
+		const FString Part = D.Get(TEXT("part")).AsString();
 		FPortsDoc Body;
 		Body.P(Esc(Text)).Note(Ids(E.Get(TEXT("factIds"))));
-		Doc.Card(TEXT("trade"), TEXT("Prologue · 1346"), TEXT("The Siege of Caffa"), Body);
-		if (Ui.hints)
+		if (Part == TEXT("how")) Doc.H2(TEXT("Before you begin"));
+		else Doc.Card(TEXT("trade"), TEXT("Prologue · 1346"), TEXT("The Siege of Caffa"), Body);
+		if (Ui.hints && Part != TEXT("story"))
 		{
 			FPortsDoc How;
 			How.P(TEXT("<b>How to play in one minute</>"));
@@ -151,7 +172,7 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 			}, true);
 			Doc.Boxed(PortsUi::PlainLook(PortsUi::Color(TEXT("#eef3fb")), 12, PortsUi::Color(TEXT("#1d4a86")), 2), How, FMargin(14, 8), FMargin(0, 14, 0, 2));
 		}
-		Button = TEXT("Roll for turn order");
+		Button = Part == TEXT("story") ? TEXT("How to play") : TEXT("Roll for turn order");
 	}
 	else if (Kind == TEXT("order"))
 	{
@@ -159,8 +180,10 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 		const V& E = D.Get(TEXT("e"));
 		Doc.H2(TEXT("Rolling for Turn Order"), ETextJustify::Center);
 		Doc.P(TEXT("The highest roll goes first; tied houses roll again. <b>This order stays the same for the whole game.</>"), ETextJustify::Center);
+		// On a big screen the rolls and the order they give can be two cards (part: "rolls", then "result").
+		const FString Part = D.Get(TEXT("part")).AsString();
 		const V& Rounds = E.Get(TEXT("rolls"));
-		for (int32 R = 0; R < Rounds.Num(); R++)
+		for (int32 R = 0; R < Rounds.Num() && Part != TEXT("result"); R++)
 		{
 			// One tray is thrown after another, as the houses roll in turn.
 			PortsUi::NextDiceTray();
@@ -173,7 +196,11 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 				Dice.Add(PortsUi::Die(X.Get(TEXT("die")).AsInt(), false, true, false, FString::Printf(TEXT("%s %s"), *PortsUi::CrestGlyph(P.crest), *Esc(P.name))));
 			}
 			Tray.Row(Dice, 22, HAlign_Center);
-			Doc.Tray(Tray);
+			// A tie's second throw is not shown, nor even announced, until the throw before it has come to rest.
+			FPortsDoc Whole;
+			Whole.Tray(Tray);
+			const float ShowAt = R == 0 ? 0.f : PortsUi::DiceTrayStart() - 0.1f;
+			Doc.AddBuilt([Whole, ShowAt](float W) { return ShowAt > 0.f ? PortsUi::Entrance(Whole.Build(W), 0, ShowAt) : Whole.Build(W); }, FMargin(0));
 		}
 		TArray<TSharedRef<SWidget>> Order;
 		const TCHAR* Places[] = { TEXT("1st"), TEXT("2nd"), TEXT("3rd"), TEXT("4th"), TEXT("5th"), TEXT("6th") };
@@ -196,8 +223,9 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 		FPortsDoc Result;
 		Result.Row(Order, 10, HAlign_Center);
 		const float After = PortsUi::DiceSettleTime() + 0.15f;
-		Doc.AddBuilt([Result, After](float W) { return PortsUi::Entrance(Result.Build(W), 0, After); });
-		Button = State.preRounds ? FString::Printf(TEXT("Begin the year %s"), *YearOf(Ports::HalfInfo(State.firstHalf).Get(TEXT("label")).AsString())) : FString(TEXT("Begin the year 1347"));
+		if (Part.IsEmpty()) Doc.AddBuilt([Result, After](float W) { return PortsUi::Entrance(Result.Build(W), 0, After); });
+		else if (Part == TEXT("result")) Doc.Nest(Result);
+		Button = Part == TEXT("rolls") ? FString(TEXT("See the turn order")) : State.preRounds ? FString::Printf(TEXT("Begin the year %s"), *YearOf(Ports::HalfInfo(State.firstHalf).Get(TEXT("label")).AsString())) : FString(TEXT("Begin the year 1347"));
 		Opts.bWide = true;
 	}
 	else if (Kind == TEXT("round"))
@@ -207,12 +235,19 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 		const FPortsRoundInfo Info = Ports::RoundInfo(State);
 		const V& Half = Ports::HalfInfo(State.round);
 		const FString Years = State.round == State.roundEnd ? Half.Get(TEXT("label")).AsString() : Info.label;
-		FPortsDoc Banner;
-		Banner.Text(FString::Printf(TEXT("%sROUND %d OF %d"), Info.pre ? TEXT("BEFORE THE PLAGUE · ") : TEXT(""), Ports::RoundNumber(State), Ports::TotalRounds(State)), TEXT("Ports.Small"), ETextJustify::Center, FMargin(0));
-		Banner.Text(Esc(Years), TEXT("Ports.Year"), ETextJustify::Center, FMargin(0));
-		Banner.Text(FString::Printf(TEXT("<i>%s</>  %s"), *Esc(Info.months), Half.Get(TEXT("season")).AsString() == TEXT("warm") ? TEXT("☀") : TEXT("❄")), TEXT("Ports.Body"), ETextJustify::Center, FMargin(0));
-		Banner.P(Esc(Info.headline), ETextJustify::Center);
-		Doc.Nest(Banner);
+		// A long list of struck cities is dealt over several cards on a big screen (page, pages, facts).
+		const int32 Page = D.Get(TEXT("page")).AsInt(1), Pages = D.Get(TEXT("pages")).AsInt(1);
+		Opts.bWide = Group.Num() > 5;
+		if (Page > 1) Doc.H2(FString::Printf(TEXT("%s: the plague arrives%s"), *Esc(Years), *PageOf(Page, Pages)));
+		else
+		{
+			FPortsDoc Banner;
+			Banner.Text(FString::Printf(TEXT("%sROUND %d OF %d"), Info.pre ? TEXT("BEFORE THE PLAGUE · ") : TEXT(""), Ports::RoundNumber(State), Ports::TotalRounds(State)), TEXT("Ports.Small"), ETextJustify::Center, FMargin(0));
+			Banner.Text(Esc(Years), TEXT("Ports.Year"), ETextJustify::Center, FMargin(0));
+			Banner.Text(FString::Printf(TEXT("<i>%s</>  %s"), *Esc(Info.months), Half.Get(TEXT("season")).AsString() == TEXT("warm") ? TEXT("☀") : TEXT("❄")), TEXT("Ports.Body"), ETextJustify::Center, FMargin(0));
+			Banner.P(Esc(Info.headline), ETextJustify::Center);
+			Doc.Nest(Banner);
+		}
 		TArray<FString> Facts = Ids(Head.Get(TEXT("factIds")));
 		if (Info.pre)
 		{
@@ -220,24 +255,37 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 		}
 		else if (Group.Num() > 1)
 		{
-			Doc.H3(TEXT("The plague arrives"));
-			const int32 DiffMod = Cfg(*(Ports::DifficultyPath(State) + TEXT(".severityMod")));
-			const FString DiffText = DiffMod ? FString::Printf(TEXT(" On %s difficulty every roll counts %s."), *Data().Config().Get(TEXT("difficulty")).Get(State.difficulty).Get(TEXT("label")).AsString(), DiffMod > 0 ? TEXT("1 higher") : TEXT("1 lower")) : FString();
-			Doc.Small(FString::Printf(TEXT("Each newly struck city rolls the red <sb>severity die</> to see how badly the plague hits it: %s. Hard-hit Tuscany and Catalonia add 1; Flanders subtracts 1.%s"), *SeverityBands(), *DiffText));
-			FPortsDoc Tray;
-			for (int32 i = 1; i < Group.Num(); i++)
+			if (Page == 1)
 			{
-				Tray.AddBuilt(ArrivalRow(State, Group[i]), FMargin(0, 3));
-				Facts.Append(Ids(Group[i].Get(TEXT("factIds"))));
+				Doc.H3(FString::Printf(TEXT("The plague arrives%s"), *PageOf(Page, Pages)));
+				const int32 DiffMod = Cfg(*(Ports::DifficultyPath(State) + TEXT(".severityMod")));
+				const FString DiffText = DiffMod ? FString::Printf(TEXT(" On %s difficulty every roll counts %s."), *Data().Config().Get(TEXT("difficulty")).Get(State.difficulty).Get(TEXT("label")).AsString(), DiffMod > 0 ? TEXT("1 higher") : TEXT("1 lower")) : FString();
+				Doc.Small(FString::Printf(TEXT("Each newly struck city rolls the red <sb>severity die</> to see how badly the plague hits it: %s. Hard-hit Tuscany and Catalonia add 1; Flanders subtracts 1.%s"), *SeverityBands(), *DiffText));
+			}
+			// On a big screen the cities stand two to a row, so the card needs less room (.big-screen .choice-list).
+			const int32 PerRow = Opts.bBig && Opts.InnerWidth() - 28.f >= 2 * 430.f + 10.f ? 2 : 1;
+			FPortsDoc Tray;
+			for (int32 i = 1; i < Group.Num(); i += PerRow)
+			{
+				TArray<FPortsDoc> Line;
+				for (int32 k = i; k < FMath::Min(Group.Num(), i + PerRow); k++)
+				{
+					FPortsDoc One;
+					One.AddBuilt(ArrivalRow(State, Group[k]), FMargin(0));
+					Line.Add(One);
+					Facts.Append(Ids(Group[k].Get(TEXT("factIds"))));
+				}
+				if (PerRow == 1) Tray.AddBuilt(ArrivalRow(State, Group[i]), FMargin(0, 3));
+				else Tray.Columns(Line, 10, FMargin(0, 3));
 			}
 			Doc.Tray(Tray);
 		}
-		else
+		else if (Page == 1)
 		{
 			Doc.P(TEXT("No new cities are struck this time."));
 		}
-		Doc.Note(Facts);
-		Opts.bWide = Group.Num() > 5;
+		Doc.Note(D.Has(TEXT("facts")) ? Ids(D.Get(TEXT("facts"))) : Facts);
+		if (Page < Pages) Button = TEXT("More cities");
 	}
 	else if (Kind == TEXT("card"))
 	{
@@ -259,7 +307,10 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 			Cards.Add(One);
 			for (const FString& Id : Ids(Ports::CardById(Group[0].Get(TEXT("card")).AsString()).Get(TEXT("factIds")))) Facts.Add(Id);
 		}
-		const int32 PerRow = Cards.Num() == 4 ? 2 : FMath::Max(1, Cards.Num());
+		// Two or four cards stand two to a row and three stand in one row; more than that (a big screen's page can
+		// hold more) fill rows of up to three, so the longest words of their titles still fit.
+		Opts.bWide = true;
+		const int32 PerRow = Cards.Num() == 4 ? 2 : Cards.Num() <= 3 ? FMath::Max(1, Cards.Num()) : FMath::Clamp(FMath::FloorToInt32((Opts.InnerWidth() + 13.f) / 273.f), 1, 3);
 		for (int32 First = 0; First < Cards.Num(); First += PerRow)
 		{
 			TArray<FPortsDoc> Line;
@@ -267,7 +318,7 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 			Doc.Columns(Line, 14, FMargin(0, 3));
 		}
 		if (Facts.Num() > 4) Facts.SetNum(4);
-		Doc.Note(Facts);
+		Doc.Note(D.Has(TEXT("facts")) ? Ids(D.Get(TEXT("facts"))) : Facts);
 		Button = Page < Pages ? TEXT("More of the chronicle") : TEXT("Continue");
 		Opts.bWide = true;
 	}
@@ -300,15 +351,13 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 	else if (Kind == TEXT("plague"))
 	{
 		const V& Group = D.Get(TEXT("group"));
-		int32 Halves = 0;
-		bool bPre = true, bRolls = false, bDeaths = false;
-		for (const V& E : Group.GetItems())
-		{
-			const FString Type = E.Get(TEXT("type")).AsString();
-			if (Type == TEXT("plague")) { Halves++; if (!E.Get(TEXT("pre")).Truthy()) bPre = false; }
-			if (Type == TEXT("mortality")) bRolls = true;
-			if (E.Get(TEXT("deaths")).AsInt() > 0) bDeaths = true;
-		}
+		// What every page of a round's plague results needs to know about the whole round (plagueRound in stories.js).
+		const V Whole = D.Get(TEXT("whole")).IsObject() ? D.Get(TEXT("whole")) : PlagueRound(Group);
+		const int32 Halves = Whole.Get(TEXT("halves")).AsInt();
+		const bool bPre = Whole.Get(TEXT("pre")).Truthy(), bRolls = Whole.Get(TEXT("rolls")).Truthy(), bDeaths = Whole.Get(TEXT("deaths")).Truthy();
+		const int32 Page = D.Get(TEXT("page")).AsInt(1), Pages = D.Get(TEXT("pages")).AsInt(1);
+		const bool bLast = Page == Pages;
+		Opts.bWide = true;
 		const FString Label = Ports::RoundInfo(State).label;
 		if (bPre)
 		{
@@ -317,18 +366,52 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 		}
 		else
 		{
-			Doc.H2(FString::Printf(TEXT("The Plague Takes Its Toll: %s"), *Esc(Label)));
-			Doc.P(TEXT("Every family member in a Stricken city rolls the mortality die."));
+			Doc.H2(FString::Printf(TEXT("The Plague Takes Its Toll: %s%s"), *Esc(Label), *PageOf(Page, Pages)));
+			if (Page == 1) Doc.P(TEXT("Every family member in a Stricken city rolls the mortality die."));
 			const int32 Bonus = Cfg(TEXT("plague.prepareBonus"));
+			// Runs of dice trays and of Aftermath lines are grouped, so a big screen can show them side by side
+			// (.big-screen .plague-grid and .aftermath-list); elsewhere they stand one under another.
+			const float Inner = Opts.InnerWidth();
+			const int32 TrayColumns = Opts.bBig ? FMath::Max(1, FMath::FloorToInt32((Inner + 13.f) / (380.f + 13.f))) : 1;
+			const int32 AfterColumns = Opts.bBig ? FMath::Clamp(FMath::FloorToInt32((Inner + 24.f) / (300.f + 24.f)), 1, 3) : 1;
+			TArray<FPortsDoc> Trays;
+			TArray<FString> After;
+			const auto Flush = [&Doc, &Trays, &After, TrayColumns, AfterColumns]()
+			{
+				for (int32 First = 0; First < Trays.Num(); First += TrayColumns)
+				{
+					TArray<FPortsDoc> Line;
+					for (int32 k = First; k < FMath::Min(Trays.Num(), First + TrayColumns); k++) Line.Add(Trays[k]);
+					if (TrayColumns == 1) Doc.Nest(Line[0], FMargin(0));
+					else Doc.Columns(Line, 13, FMargin(0));
+				}
+				if (AfterColumns == 1 || After.Num() < 2) for (const FString& Line : After) Doc.P(Line);
+				else
+				{
+					const int32 N = FMath::Min(AfterColumns, After.Num());
+					const int32 Each = FMath::DivideAndRoundUp(After.Num(), N);
+					TArray<FPortsDoc> Columns;
+					for (int32 c = 0; c < N; c++)
+					{
+						FPortsDoc Column;
+						for (int32 k = c * Each; k < FMath::Min(After.Num(), (c + 1) * Each); k++) Column.P(After[k]);
+						Columns.Add(Column);
+					}
+					Doc.Columns(Columns, 24, FMargin(0));
+				}
+				Trays.Reset();
+				After.Reset();
+			};
 			for (const V& E : Group.GetItems())
 			{
 				const FString Type = E.Get(TEXT("type")).AsString();
+				if (Type != TEXT("mortality") && Type != TEXT("aftermath")) Flush();
 				if (Type == TEXT("plague"))
 				{
 					if (Halves > 1) Doc.H3(Esc(Ports::HalfInfo(E.Get(TEXT("half")).AsInt()).Get(TEXT("label")).AsString()));
 					if (E.Get(TEXT("pre")).Truthy()) Doc.P(Esc(E.Get(TEXT("text")).AsString()));
 				}
-				else if (Type == TEXT("aftermath")) Doc.P(FString::Printf(TEXT("❦ %s"), *Esc(E.Get(TEXT("text")).AsString())));
+				else if (Type == TEXT("aftermath")) After.Add(FString::Printf(TEXT("❦ %s"), *Esc(E.Get(TEXT("text")).AsString())));
 				else if (Type != TEXT("mortality")) Doc.P(Esc(E.Get(TEXT("text")).AsString()));
 				else
 				{
@@ -348,14 +431,17 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 					}
 					Tray.Row(Dice, 14);
 					Tray.Light(Esc(E.Get(TEXT("text")).AsString()));
-					Doc.Tray(Tray);
+					FPortsDoc One;
+					One.Tray(Tray);
+					Trays.Add(One);
 				}
 			}
-			if (!bRolls) Doc.P(TEXT("No family members were in Stricken cities this round."));
-			if (bDeaths) Doc.Note({ TEXT("EC-10"), TEXT("DB-01") });
+			Flush();
+			if (!bRolls && bLast) Doc.P(TEXT("No family members were in Stricken cities this round."));
+			if (D.Has(TEXT("facts"))) Doc.Note(Ids(D.Get(TEXT("facts"))));
+			else if (bDeaths) Doc.Note({ TEXT("EC-10"), TEXT("DB-01") });
 		}
-		Button = State.roundEnd >= Cfg(TEXT("rounds")) ? TEXT("Final scoring") : TEXT("Begin the next round");
-		Opts.bWide = true;
+		Button = !bLast ? TEXT("Continue") : State.roundEnd >= Cfg(TEXT("rounds")) ? TEXT("Final scoring") : TEXT("Begin the next round");
 	}
 	else if (Kind == TEXT("ship"))
 	{
@@ -445,17 +531,55 @@ void UPortsGameFlow::OpenStoryPage(const FString& Kind, const V& Data)
 	const bool bBotCard = P && P->bot && Opts.AutoClose <= 0.f;
 	if (bBotCard) Opts.AutoClose = Cfg(TEXT("bots.cardSeconds"));
 	const FString Label = bBotCard ? FString::Printf(TEXT("%s <lsmall>(or wait %d seconds)</>"), *PortsUi::Esc(Button), Cfg(TEXT("bots.cardSeconds"))) : PortsUi::Esc(Button);
+	if (Remote())
+	{
+		// Every device can read this card and press Next on it (the titles are those of stories.js).
+		const V& CardOf = Data.Get(TEXT("e")).IsObject() ? Data.Get(TEXT("e")) : Data.Get(TEXT("group")).IsArray() && Data.Get(TEXT("group")).Num() ? Data.Get(TEXT("group"))[0] : Data;
+		const FString CardId = Kind == TEXT("reveal") ? Data.Get(TEXT("cardId")).AsString() : CardOf.Get(TEXT("card")).AsString();
+		const int32 PageNo = Data.Get(TEXT("page")).AsInt(), PageCount = Data.Get(TEXT("pages")).AsInt();
+		StoryTitle = Kind == TEXT("prologue") ? (Data.Get(TEXT("part")).AsString() == TEXT("how") ? TEXT("How to play") : TEXT("Prologue"))
+			: Kind == TEXT("order") ? TEXT("Turn order")
+			: Kind == TEXT("round") ? Ports::RoundInfo(State).label + (PageCount > 1 ? FString::Printf(TEXT(" (%d of %d)"), PageNo, PageCount) : FString())
+			: Kind == TEXT("card") || Kind == TEXT("reveal") ? Ports::CardById(CardId).Get(TEXT("title")).AsString()
+			: Kind == TEXT("chronicle") ? (PageCount > 1 ? FString::Printf(TEXT("Chronicle %d of %d"), PageNo, PageCount) : FString(TEXT("Chronicle")))
+			: Kind == TEXT("fortune") ? TEXT("Fortune card: ") + Ports::FortuneById(CardId).Get(TEXT("title")).AsString()
+			: Kind == TEXT("plague") ? FString((Data.Get(TEXT("whole")).IsObject() ? Data.Get(TEXT("whole")) : PlagueRound(Data.Get(TEXT("group")))).Get(TEXT("pre")).Truthy() ? TEXT("End of the round") : TEXT("Plague results")) + (PageCount > 1 ? FString::Printf(TEXT(" (%d of %d)"), PageNo, PageCount) : FString())
+			: Kind == TEXT("ship") ? TEXT("Shipment result") : Kind == TEXT("spread") ? TEXT("Plague spreads") : Kind == TEXT("physician") ? TEXT("Physician") : Kind == TEXT("wage") ? TEXT("Wage inspection") : TEXT("Continue");
+		StoryId = ++StorySeq;
+		StoryLabel = Button;
+		StoryKind = Kind;
+		StoryData = Data;
+		PushToDevices();
+	}
 	Open([Doc, Label](TFunction<void(const FString&)> Close)
 	{
 		Doc->Buttons({ PortsUi::Button(Label + TEXT("  <lsmall>Enter</>"), [Close]() { Close(TEXT("ok")); }, PortsUi::EButton::Primary) });
 		return Doc->Widget();
-	}, Opts, nullptr);
+	}, Opts, [this](const FString&) { StoryId = 0; PushToDevices(); });
 }
 
-// A round's Chronicle cards are dealt over pages of at most four (chroniclePages in stories.js).
-void UPortsGameFlow::Story(const FString& Kind, const V& Data, TFunction<void()> After)
+// How far a big screen would have to shrink this card to show all of it (zoomNeeded in game.js).
+float UPortsGameFlow::StoryZoom(const FString& Kind, const V& Page) const
 {
-	TArray<V> Pages;
+	FPortsDialogOptions Opts;
+	FString Button;
+	FPortsDoc Doc;
+	BuildStory(Kind, Page, Doc, Button, Opts);
+	Doc.Buttons({ PortsUi::Button(PortsUi::Esc(Button) + TEXT("  <lsmall>Enter</>"), []() {}, PortsUi::EButton::Primary) });
+	const TSharedRef<SWidget> Built = Doc.Build(Opts.InnerWidth());
+	Built->SlatePrepass(Root->LayoutScale());
+	const float Space = Root->ViewHeight() * 0.9f - 64.f;
+	const float Tall = Built->GetDesiredSize().Y;
+	return Tall <= Space ? 1.f : FMath::Max(0.45f, Space / FMath::Max(1.f, Tall));
+}
+
+// The cards one story is dealt out over. A round's Chronicle cards go over pages of at most four
+// (chroniclePages in stories.js). On the big screen of a multi-device game nobody can scroll, so there a long
+// card is dealt over as many cards as keep it easy to read: no card shrinks below 0.8 of its size while it
+// holds more than one piece (splitStory in stories.js, storyPages in game.js).
+TArray<V> UPortsGameFlow::StoryPages(const FString& Kind, const V& Data) const
+{
+	TArray<V> Fallback;
 	if (Kind == TEXT("chronicle"))
 	{
 		const V& Groups = Data.Get(TEXT("groups"));
@@ -465,10 +589,158 @@ void UPortsGameFlow::Story(const FString& Kind, const V& Data, TFunction<void()>
 		{
 			V Slice = V::Array();
 			for (int32 k = i * Size; k < FMath::Min(Groups.Num(), (i + 1) * Size); k++) Slice.Add(Groups[k]);
-			Pages.Add(V::Object({ { TEXT("groups"), Slice }, { TEXT("page"), i + 1 }, { TEXT("pages"), Count } }));
+			Fallback.Add(V::Object({ { TEXT("groups"), Slice }, { TEXT("page"), i + 1 }, { TEXT("pages"), Count } }));
 		}
 	}
-	else Pages.Add(Data);
-	for (const V& Page : Pages) Steps.Add([this, Kind, Page]() { OpenStoryPage(Kind, Page); });
-	if (After) Steps.Add(After);
+	else Fallback.Add(Data);
+	if (!Remote()) return Fallback;
+
+	using FParts = TArray<TArray<V>>;
+	TArray<V> Units;
+	TFunction<TArray<V>(const FParts&)> Make;
+	const auto Numbered = [](TArray<V> Pages) { for (int32 i = 0; i < Pages.Num(); i++) { Pages[i].Set(TEXT("page"), i + 1); Pages[i].Set(TEXT("pages"), Pages.Num()); } return Pages; };
+	// Each historical fact is a piece of its own, named once.
+	const auto AddFacts = [&Units](const TArray<FString>& FactIds)
+	{
+		TArray<FString> Seen;
+		for (const FString& Id : FactIds)
+		{
+			if (Seen.Contains(Id) || !FPortsData::Get().Facts().GetItems().ContainsByPredicate([&Id](const V& F) { return F.Get(TEXT("id")).AsString() == Id; })) continue;
+			Seen.Add(Id);
+			Units.Add(V::Object({ { TEXT("fact"), V(Id) } }));
+		}
+	};
+	const auto FactsIn = [](const TArray<V>& Part) { V Out = V::Array(); for (const V& U : Part) if (U.Has(TEXT("fact"))) Out.Add(U.Get(TEXT("fact"))); return Out; };
+
+	if ((Kind == TEXT("prologue") && Ui.hints) || Kind == TEXT("order"))
+	{
+		const bool bOrder = Kind == TEXT("order");
+		Units = { V(bOrder ? TEXT("rolls") : TEXT("story")), V(bOrder ? TEXT("result") : TEXT("how")) };
+		const TArray<V> Names = Units;
+		Make = [Data, Names](const FParts& Parts)
+		{
+			TArray<V> Out;
+			if (Parts.Num() < 2) { Out.Add(Data); return Out; }
+			for (const V& Name : Names) { V Page = Data; Page.Set(TEXT("part"), Name); Out.Add(Page); }
+			return Out;
+		};
+	}
+	else if (Kind == TEXT("round"))
+	{
+		const V& Group = Data.Get(TEXT("group"));
+		const V Head = Group[0];
+		TArray<FString> FactIds = Head.Get(TEXT("factIds")).ToStrings();
+		for (int32 i = 1; i < Group.Num(); i++) { Units.Add(V::Object({ { TEXT("arrival"), Group[i] } })); FactIds.Append(Group[i].Get(TEXT("factIds")).ToStrings()); }
+		AddFacts(FactIds);
+		Make = [Head, Numbered, FactsIn](const FParts& Parts)
+		{
+			TArray<V> Out;
+			for (const TArray<V>& Part : Parts)
+			{
+				V PageGroup = V::Array({ Head });
+				for (const V& U : Part) if (U.Has(TEXT("arrival"))) PageGroup.Add(U.Get(TEXT("arrival")));
+				Out.Add(V::Object({ { TEXT("group"), PageGroup }, { TEXT("facts"), FactsIn(Part) } }));
+			}
+			return Numbered(Out);
+		};
+	}
+	else if (Kind == TEXT("chronicle"))
+	{
+		TArray<FString> FactIds;
+		for (const V& G : Data.Get(TEXT("groups")).GetItems()) Units.Add(V::Object({ { TEXT("group"), G } }));
+		// The facts each page would show where cards can scroll: up to four a page.
+		for (const V& Page : Fallback)
+		{
+			TArray<FString> OfPage;
+			for (const V& G : Page.Get(TEXT("groups")).GetItems()) OfPage.Append(Ports::CardById(G[0].Get(TEXT("card")).AsString()).Get(TEXT("factIds")).ToStrings());
+			if (OfPage.Num() > 4) OfPage.SetNum(4);
+			FactIds.Append(OfPage);
+		}
+		AddFacts(FactIds);
+		Make = [Numbered, FactsIn](const FParts& Parts)
+		{
+			TArray<V> Out;
+			for (const TArray<V>& Part : Parts)
+			{
+				V Groups = V::Array();
+				for (const V& U : Part) if (U.Has(TEXT("group"))) Groups.Add(U.Get(TEXT("group")));
+				Out.Add(V::Object({ { TEXT("groups"), Groups }, { TEXT("facts"), FactsIn(Part) } }));
+			}
+			return Numbered(Out);
+		};
+	}
+	else if (Kind == TEXT("plague"))
+	{
+		const V& Group = Data.Get(TEXT("group"));
+		const V Whole = PlagueRound(Group);
+		if (Whole.Get(TEXT("pre")).Truthy()) return Fallback;
+		// A half-year heading stays with the line that follows it.
+		V Heads = V::Array();
+		for (const V& E : Group.GetItems())
+		{
+			if (E.Get(TEXT("type")).AsString() == TEXT("plague")) { Heads.Add(E); continue; }
+			V Lines = Heads;
+			Lines.Add(E);
+			Units.Add(V::Object({ { TEXT("lines"), Lines } }));
+			Heads = V::Array();
+		}
+		if (Heads.Num())
+		{
+			if (Units.Num()) { V Lines = Units.Last().Get(TEXT("lines")); for (const V& H : Heads.GetItems()) Lines.Add(H); Units.Last().Set(TEXT("lines"), Lines); }
+			else Units.Add(V::Object({ { TEXT("lines"), Heads } }));
+		}
+		if (Whole.Get(TEXT("deaths")).Truthy()) AddFacts({ TEXT("EC-10"), TEXT("DB-01") });
+		Make = [Whole, Numbered, FactsIn](const FParts& Parts)
+		{
+			TArray<V> Out;
+			for (const TArray<V>& Part : Parts)
+			{
+				V PageGroup = V::Array();
+				for (const V& U : Part) for (const V& Line : U.Get(TEXT("lines")).GetItems()) PageGroup.Add(Line);
+				Out.Add(V::Object({ { TEXT("group"), PageGroup }, { TEXT("facts"), FactsIn(Part) }, { TEXT("whole"), Whole } }));
+			}
+			return Numbered(Out);
+		};
+	}
+	if (!Make || Units.Num() == 0) return Fallback;
+
+	constexpr float Readable = 0.8f;
+	const auto Fits = [this, &Kind](const V& Page) { return StoryZoom(Kind, Page) >= Readable; };
+	FParts Parts;
+	Parts.AddDefaulted();
+	for (const V& Unit : Units)
+	{
+		FParts Fuller = Parts;
+		Fuller.Last().Add(Unit);
+		if (Parts.Last().Num() && !Fits(Make(Fuller).Last())) Parts.Add({ Unit });
+		else Parts = Fuller;
+	}
+	// The same number of cards, evenly filled, when that is readable too (share in stories.js).
+	FParts Even;
+	for (int32 i = 0; i < Parts.Num(); i++)
+	{
+		const int32 From = FMath::RoundToInt32(static_cast<double>(i) * Units.Num() / Parts.Num()), To = FMath::RoundToInt32(static_cast<double>(i + 1) * Units.Num() / Parts.Num());
+		if (To > From) Even.Add(TArray<V>(Units.GetData() + From, To - From));
+	}
+	const TArray<V> EvenPages = Make(Even);
+	bool bEvenFits = true;
+	for (const V& Page : EvenPages) bEvenFits = bEvenFits && Fits(Page);
+	const TArray<V> Dealt = bEvenFits ? EvenPages : Make(Parts);
+	FString Sizes;
+	for (const V& Page : Dealt) Sizes += FString::Printf(TEXT(" %.2f"), StoryZoom(Kind, Page));
+	UE_LOG(LogTemp, Display, TEXT("PortsStory: %s in %d pieces over %d cards (%s), each shown at%s of its size."), *Kind, Units.Num(), Dealt.Num(), bEvenFits ? TEXT("evenly") : TEXT("as they fit"), *Sizes);
+	return Dealt;
+}
+
+void UPortsGameFlow::Story(const FString& Kind, const V& Data, TFunction<void()> After)
+{
+	// The pages are settled when the story's turn comes, not before: by then the screen and the game are as they will be shown.
+	Steps.Add([this, Kind, Data, After]()
+	{
+		const TArray<V> Pages = StoryPages(Kind, Data);
+		TArray<TFunction<void()>> Mine;
+		for (const V& Page : Pages) Mine.Add([this, Kind, Page]() { OpenStoryPage(Kind, Page); });
+		if (After) Mine.Add(After);
+		Steps.Insert(Mine, 0);
+	});
 }

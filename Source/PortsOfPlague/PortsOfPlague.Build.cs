@@ -7,6 +7,6 @@ public class PortsOfPlague : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "PortsEngine" });
-		PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore", "ApplicationCore", "Json", "ProceduralMeshComponent", "GeometryCore" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore", "ApplicationCore", "WebSockets", "Json", "ProceduralMeshComponent", "GeometryCore" });
 	}
 }

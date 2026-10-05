@@ -89,6 +89,7 @@ public:
 	virtual void OnMouseEnter(const FGeometry& Geometry, const FPointerEvent& Event) override;
 	virtual void OnMouseLeave(const FPointerEvent& Event) override;
 	virtual FCursorReply OnCursorQuery(const FGeometry& Geometry, const FPointerEvent& Event) const override;
+	bool CanClick() const { return bCanClick; }
 
 private:
 	void UpdateShift();
@@ -100,6 +101,23 @@ private:
 	FVector2D HoverShift;
 	FVector2D DownShift;
 	TFunction<void()> OnClicked;
+};
+
+// Shows its content smaller (or larger) by a fixed amount, laying it out in the room that leaves it.
+class SPortsZoom : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SPortsZoom) : _Zoom(1.f) {}
+		SLATE_ARGUMENT(float, Zoom)
+		SLATE_DEFAULT_SLOT(FArguments, Content)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& Args);
+	virtual FVector2D ComputeDesiredSize(float LayoutScale) const override;
+	virtual void OnArrangeChildren(const FGeometry& Geometry, FArrangedChildren& Children) const override;
+
+private:
+	float Zoom = 1.f;
 };
 
 namespace PortsUi
@@ -162,6 +180,8 @@ namespace PortsUi
 	void NextDiceTray();
 	// How long after the card appears the last die made so far comes to rest, in seconds.
 	float DiceSettleTime();
+	// How long after the card appears the dice made next will be thrown.
+	float DiceTrayStart();
 	// Whether dice tumble at all (not while the game is checking itself).
 	void SetDiceStill(bool bStill);
 

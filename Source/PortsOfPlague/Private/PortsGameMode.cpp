@@ -203,6 +203,18 @@ void APortsGameMode::RunDevOptions()
 	FString Test;
 	if (Flow && FParse::Value(FCommandLine::Get(), TEXT("PortsTest="), Test, false)) Flow->StartTestGame(Test);
 
+	// -PortsShotEvery=file.png,seconds: saves a picture of the screen to that file again and again, without quitting.
+	FString Every;
+	if (FParse::Value(FCommandLine::Get(), TEXT("PortsShotEvery="), Every, false))
+	{
+		FString File, Seconds;
+		if (Every.Split(TEXT(","), &File, &Seconds, ESearchCase::IgnoreCase, ESearchDir::FromEnd))
+		{
+			FTimerHandle EveryHandle;
+			GetWorldTimerManager().SetTimer(EveryHandle, [File]() { FScreenshotRequest::RequestScreenshot(File, true, false); }, FMath::Max(1.f, FCString::Atof(*Seconds)), true);
+		}
+	}
+
 	FString Shot;
 	if (FParse::Value(FCommandLine::Get(), TEXT("PortsShot="), Shot))
 	{

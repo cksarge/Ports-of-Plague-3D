@@ -699,6 +699,16 @@ namespace PortsUi
 		S.Set("capsb", Text(Caps(19.8f, true), Ink, 30));
 		S.Set("capsred", Text(Caps(18.9f, true), Red, 30));
 		S.Set("legend", Text(Caps(14.4f, true), Red, 20));
+		// The lobby's room-code box: where to join, and the code itself.
+		S.Set("chip", Text(Caps(16.f, false), TEXT("#f3d27a")));
+		S.Set("chipcode", Text(Caps(21.f, true), TEXT("#fff6e0"), 120));
+		S.Set("chipat", Text(Serif(14.4f), TEXT("#fbe9c0")));
+		S.Set("doton", Text(Serif(13.f), TEXT("#2e9d5b")));
+		S.Set("dotoff", Text(Serif(13.f), TEXT("#b9ad92")));
+		S.Set("roomat", Text(Serif(28.f), TEXT("#fbe9c0")));
+		S.Set("roomaddr", Text(Serif(28.f, TEXT("Bold")), TEXT("#f3d27a")));
+		S.Set("roomem", Text(Serif(28.f, TEXT("Italic")), TEXT("#fbe9c0")));
+		S.Set("roomcode", Text(Caps(70.f, true), TEXT("#fff6e0"), 180));
 		S.Set("track", Text(Serif(11.f), TEXT("#f3d27a")));
 		S.Set("trackon", Text(Serif(12.5f), TEXT("#5c0d09")));
 		S.Set("lb", Text(Serif(18, TEXT("Bold")), TEXT("#fff6e0")));
@@ -936,6 +946,7 @@ namespace PortsUi
 	void SetDiceSound(TFunction<void()> Play) { GDiceSound = MoveTemp(Play); }
 	void ResetDice() { GDiceBase = 0.45f; GDiceCount = 0; }
 	void NextDiceTray() { if (GDiceCount > 0) { GDiceBase += SPortsDie::RollSeconds + 0.1f; GDiceCount = 0; } }
+	float DiceTrayStart() { return GDiceStill ? 0.f : GDiceBase; }
 	float DiceSettleTime() { return GDiceStill ? 0.f : GDiceBase + SPortsDie::RollSeconds + FMath::Max(0, GDiceCount - 1) * 0.07f; }
 	void SetDiceStill(bool bStill) { GDiceStill = bStill; }
 
@@ -1220,4 +1231,28 @@ FPortsDoc& FPortsDoc::Row(const TArray<TSharedRef<SWidget>>& Widgets, float Gap,
 FPortsDoc& FPortsDoc::Buttons(const TArray<TSharedRef<SWidget>>& Widgets)
 {
 	return Row(Widgets, 10, HAlign_Right).Space(2);
+}
+
+// ---------- A page shown smaller ----------
+
+void SPortsZoom::Construct(const FArguments& Args)
+{
+	Zoom = FMath::Max(0.05f, Args._Zoom);
+	// The content is laid out at its own size and only drawn smaller. Laid out smaller instead, its text would be
+	// measured at another size, break its lines elsewhere, and no longer fit the boxes made for it.
+	const TSharedRef<SWidget> Content = Args._Content.Widget;
+	Content->SetRenderTransformPivot(FVector2D::ZeroVector);
+	Content->SetRenderTransform(FSlateRenderTransform(Zoom));
+	ChildSlot[ Content ];
+}
+
+FVector2D SPortsZoom::ComputeDesiredSize(float) const
+{
+	return FVector2D(ChildSlot.GetWidget()->GetDesiredSize()) * Zoom;
+}
+
+void SPortsZoom::OnArrangeChildren(const FGeometry& Geometry, FArrangedChildren& Children) const
+{
+	const TSharedRef<SWidget> Child = ChildSlot.GetWidget();
+	if (Children.Accepts(Child->GetVisibility())) Children.AddWidget(Geometry.MakeChild(Child, FVector2D(Geometry.GetLocalSize()) / Zoom, FSlateLayoutTransform()));
 }

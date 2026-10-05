@@ -229,9 +229,20 @@ void SPortsRoot::OpenDialog(TFunction<TSharedRef<SWidget>(FPortsClose)> Build, c
 	Watch(Built, Options.bStory ? TEXT("story card") : Options.bSide ? TEXT("side prompt") : Options.bWide ? TEXT("wide card") : TEXT("card"));
 	// While a card is being dealt it may lift and turn a little outside the page; the page only trims its
 	// contents to its edge (as it must, to scroll) once the card has settled.
-	const TSharedRef<SScrollBox> Scroll = SNew(SScrollBox).ExternalScrollbar(Bar).Clipping(Options.bStory ? EWidgetClipping::Inherit : EWidgetClipping::ClipToBounds)
-		+ SScrollBox::Slot().Padding(FMargin(0, 0, 14, 0))[ Built ];
-	if (Options.bStory)
+	// That is only allowed when the whole card fits on the page. A card too long for the page has to scroll, and
+	// left untrimmed its text would run out past the page's lower border until the trimming began.
+	Built->SlatePrepass(FMath::Max(0.1f, GetCachedGeometry().Scale));
+	const float Room = ViewHeight() * 0.9f - 64.f;
+	const float Tall = Built->GetDesiredSize().Y;
+	const float Zoom = Options.bFit && Tall > Room && Tall > 1.f ? FMath::Clamp(Room / Tall, 0.45f, 1.f) : 1.f;
+	const bool bFits = Tall * Zoom < Room + 0.5f;
+	const bool bLoose = Options.bStory && bFits;
+	const TSharedRef<SWidget> Sized = Zoom < 1.f
+		? StaticCastSharedRef<SWidget>(SNew(SPortsZoom).Zoom(Zoom)[ Built ])
+		: Built;
+	const TSharedRef<SScrollBox> Scroll = SNew(SScrollBox).ExternalScrollbar(Bar).Clipping(bLoose ? EWidgetClipping::Inherit : EWidgetClipping::ClipToBounds)
+		+ SScrollBox::Slot().Padding(FMargin(0, 0, 14, 0))[ Sized ];
+	if (bLoose)
 	{
 		TWeakPtr<SScrollBox> WeakScroll = Scroll;
 		RegisterActiveTimer(1.0f, FWidgetActiveTimerDelegate::CreateLambda([WeakScroll](double, float)
@@ -241,7 +252,7 @@ void SPortsRoot::OpenDialog(TFunction<TSharedRef<SWidget>(FPortsClose)> Build, c
 		}));
 	}
 	const TSharedRef<SWidget> Frame = SNew(SBox)
-		.WidthOverride(Options.FrameWidth())
+		.WidthOverride(72.f + (Options.FrameWidth() - 72.f) * Zoom)
 		.MaxDesiredHeight(TAttribute<FOptionalSize>::CreateLambda([Weak]() { const TSharedPtr<SPortsRoot> Root = Weak.Pin(); return FOptionalSize((Root.IsValid() ? Root->ViewHeight() : 720.f) * 0.9f); }))
 		[
 			PortsUi::Entrance(PortsUi::Frame(SNew(SOverlay)
@@ -272,6 +283,7 @@ void SPortsRoot::OpenDialog(TFunction<TSharedRef<SWidget>(FPortsClose)> Build, c
 	Dialog.Id = Id;
 	Dialog.Widget = Layer;
 	Dialog.Frame = Frame;
+	Dialog.Scroll = Scroll;
 	Dialog.Options = Options;
 	Dialog.OnClose = OnClose;
 	Dialogs.Add(Dialog);
