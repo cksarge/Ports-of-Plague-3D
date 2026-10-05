@@ -56,6 +56,11 @@ void UPortsGameFlow::Start(APortsMapActor* InMap)
 	// The menu is drawn a few frames in, once the window knows how sharp its screen is: drawn at once, its text is
 	// measured for an ordinary screen and shifts a little when the Retina measurements arrive.
 	MenuDueIn = 3;
+	// Until then the screen is dark, as the splash screen will be, so the game opens from black and not with a
+	// glimpse of the map.
+	const FString Line = FCommandLine::Get();
+	const bool bChecking = (Line.Contains(TEXT("PortsTest=")) || Line.Contains(TEXT("PortsPress="))) && !Line.Contains(TEXT("PortsSplash=")) && !FParse::Param(*Line, TEXT("PortsStart"));
+	if (!bChecking) Root->SetScreen(SNew(SPortsSplash).Custom(SplashStyle() == TEXT("custom")).Still(true));
 }
 
 // Which splash screen opens the game: "official", "custom" or none ([PortsOfPlague.Splash] Style in DefaultGame.ini;
@@ -765,7 +770,7 @@ void UPortsGameFlow::Tick(float DeltaSeconds)
 			SplashUntil = FPlatformTime::Seconds() + SPortsSplash::Seconds(bCustom);
 			ShowStart(SNew(SPortsSplash).Custom(bCustom));
 		}
-		else ShowStart();
+		else ShowStart(SNew(SPortsSplash).Blank(true));
 	}
 	if (SplashUntil > 0 && FPlatformTime::Seconds() >= SplashUntil) SplashUntil = 0;
 	// Start has been pressed. The title fades first; the menu's card rises while the map is still coming into

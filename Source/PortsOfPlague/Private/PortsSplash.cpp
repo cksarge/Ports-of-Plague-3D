@@ -21,13 +21,15 @@ namespace
 	class SPortsSplashArt : public SLeafWidget
 	{
 	public:
-		SLATE_BEGIN_ARGS(SPortsSplashArt) : _Custom(false) {}
+		SLATE_BEGIN_ARGS(SPortsSplashArt) : _Custom(false), _Blank(false) {}
 			SLATE_ARGUMENT(bool, Custom)
+			SLATE_ARGUMENT(bool, Blank)
 		SLATE_END_ARGS()
 
 		void Construct(const FArguments& Args)
 		{
 			bCustom = Args._Custom;
+			bBlank = Args._Blank;
 			Started = FSlateApplication::Get().GetCurrentTime();
 			White = PortsUi::PictureBrush(TEXT("splash_logo_white"));
 			Gold = PortsUi::PictureBrush(TEXT("splash_logo_gold"));
@@ -44,8 +46,12 @@ namespace
 			const double T = FSlateApplication::Get().GetCurrentTime() - Started;
 			const FVector2f Size = Geometry.GetLocalSize();
 			// Black for Epic's own logo; for the gilded one, the near-black brown of the game's table.
-			const FLinearColor Ground = bCustom ? FLinearColor(0.012f, 0.007f, 0.004f, 1.f) : FLinearColor::Black;
+			// How much of this screen is still there: it thins as a whole while it fades onto the start screen.
+			const float Here = Style.GetColorAndOpacityTint().A;
+			FLinearColor Ground = bCustom ? FLinearColor(0.012f, 0.007f, 0.004f, 1.f) : FLinearColor::Black;
+			Ground.A = Here;
 			FSlateDrawElement::MakeBox(Out, Layer, Geometry.ToPaintGeometry(), Fill.Get(), ESlateDrawEffect::None, Ground);
+			if (bBlank) return Layer;
 
 			// Epic's guideline: on a wide screen the logo is half the screen's height, in the middle. On a tall
 			// one the symbol is a third of the screen's width (the symbol is the logo's full width).
@@ -54,8 +60,11 @@ namespace
 			const FVector2f LogoSize(High * LogoAspect, High);
 			const FVector2f At((Size.X - LogoSize.X) * 0.5f, (Size.Y - LogoSize.Y) * 0.5f);
 			// One of the logo's pictures, whole, or only the part of it inside a window (given in parts of the logo).
+			// Before the dark lifts, the logo has already faded into it.
+			const float Leaving = 1.f - Span(T, SPortsSplash::Seconds(bCustom) - SPortsSplash::FadeSeconds - 0.6f, SPortsSplash::Seconds(bCustom) - SPortsSplash::FadeSeconds);
 			const auto Draw = [&](const FSlateBrush* Brush, float Opacity, float Left = 0, float Top = 0, float Right = 1, float Bottom = 1)
 			{
+				Opacity *= Leaving * Here;
 				if (Opacity <= 0.003f || Right <= Left || Bottom <= Top) return;
 				const bool bPart = Left > 0 || Top > 0 || Right < 1 || Bottom < 1;
 				if (bPart) Out.PushClip(FSlateClippingZone(Geometry.ToPaintGeometry(FVector2f(LogoSize.X * (Right - Left), LogoSize.Y * (Bottom - Top)), FSlateLayoutTransform(At + FVector2f(LogoSize.X * Left, LogoSize.Y * Top)))));
@@ -86,6 +95,7 @@ namespace
 
 	private:
 		bool bCustom = false;
+		bool bBlank = false;
 		double Started = 0;
 		const FSlateBrush* White = nullptr;
 		const FSlateBrush* Gold = nullptr;
@@ -99,13 +109,15 @@ void SPortsSplash::Construct(const FArguments& Args)
 {
 	const bool bCustom = Args._Custom;
 	const double Started = FSlateApplication::Get().GetCurrentTime();
-	const float Total = Seconds(bCustom);
+	const bool bBlank = Args._Blank || Args._Still;
+	const bool bStill = Args._Still;
+	const float Total = Seconds(bCustom, bBlank);
 	// The trademark notice Epic requires wherever its logo is shown on a splash screen, word for word.
 	const FText Notice = FText::FromString(TEXT("Unreal®, Unreal Engine®, and the Unreal Engine® logo are trademarks or registered trademarks of Epic Games, Inc. in the United States of America and elsewhere. Other brands or product names are the trademarks of their respective owners."));
 	ChildSlot
 	[
 		SNew(SOverlay)
-		+ SOverlay::Slot()[ SNew(SPortsSplashArt).Custom(bCustom) ]
+		+ SOverlay::Slot()[ SNew(SPortsSplashArt).Custom(bCustom).Blank(bBlank) ]
 		+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Bottom).Padding(40, 0, 40, 44)
 		[
 			SNew(SBox).MaxDesiredWidth(980)
@@ -115,17 +127,26 @@ void SPortsSplash::Construct(const FArguments& Args)
 				.Font(PortsUi::Serif(18))
 				.Justification(ETextJustify::Center)
 				.AutoWrapText(true)
-				.ColorAndOpacity(bCustom ? FLinearColor(0.93f, 0.85f, 0.66f, 0.85f) : FLinearColor(1, 1, 1, 0.8f))
+				.Visibility(bBlank ? EVisibility::Collapsed : EVisibility::HitTestInvisible)
+				// The notice comes and goes with the logo.
+				.ColorAndOpacity_Lambda([bCustom, Started, Total]()
+				{
+					const double T = FSlateApplication::Get().GetCurrentTime() - Started;
+					const float Shown = Span(T, 0.15f, 0.7f) * (1.f - Span(T, Total - FadeSeconds - 0.6f, Total - FadeSeconds));
+					return FSlateColor(bCustom ? FLinearColor(0.93f, 0.85f, 0.66f, 0.85f * Shown) : FLinearColor(1, 1, 1, 0.8f * Shown));
+				})
 			]
 		]
 	];
 	SetVisibility(EVisibility::Visible);
 	// The whole screen fades away at the end, to the start screen behind it.
 	SetRenderOpacity(1.f);
+	if (bStill) return;
 	RegisterActiveTimer(0.f, FWidgetActiveTimerDelegate::CreateLambda([this, Started, Total](double, float)
 	{
 		const double T = FSlateApplication::Get().GetCurrentTime() - Started;
-		SetRenderOpacity(1.f - Span(T, Total - 0.9f, Total));
+		// The logo and its notice go first, into the dark; then the dark itself lifts slowly off the start screen.
+		SetRenderOpacity(1.f - Span(T, Total - FadeSeconds, Total));
 		if (T <= Total) return EActiveTimerReturnType::Continue;
 		// Gone: what is behind it can be clicked again.
 		SetVisibility(EVisibility::Collapsed);
