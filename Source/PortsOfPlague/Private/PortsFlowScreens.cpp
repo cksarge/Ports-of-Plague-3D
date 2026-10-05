@@ -246,6 +246,14 @@ void UPortsGameFlow::ShowMenu()
 	Buttons.Add(PortsUi::Button(TEXT("New game"), [this]() { SetupForm.Reset(); ShowSetup(); }, bSaved ? EButton::Normal : EButton::Primary), FMargin(0, 6));
 	Buttons.Add(PortsUi::Button(TEXT("Rules  <key>R</>"), [this]() { ShowRules(); }), FMargin(0, 6));
 	Buttons.Add(PortsUi::Button(TEXT("About & credits"), [this]() { ShowCredits(); }), FMargin(0, 6));
+	// Not on the website, which is closed with its browser tab: the way out of a full-screen game.
+	Buttons.Add(PortsUi::Button(TEXT("Quit"), [this]()
+	{
+		// Devices still in a room are told the big screen has gone.
+		CloseLobbyRoom();
+		if (Room.IsValid()) { Room->Close(); Room.Reset(); }
+		FPlatformMisc::RequestExit(false);
+	}, EButton::Ghost), FMargin(0, 6));
 	Buttons.AddBuilt([this](float)
 	{
 		return SNew(SHorizontalBox)

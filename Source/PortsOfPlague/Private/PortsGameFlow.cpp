@@ -725,6 +725,12 @@ void UPortsGameFlow::Tick(float DeltaSeconds)
 {
 	if (!Root.IsValid() || !Map) return;
 	if (MenuDueIn > 0 && --MenuDueIn == 0 && !bInGame && !SetupForm.IsValid() && !Finale.IsValid()) ShowMenu();
+	// The window is named for the game, not for the project file and the kind of build.
+	if (!bWindowNamed && !GIsEditor && GEngine && GEngine->GameViewport && GEngine->GameViewport->GetWindow().IsValid())
+	{
+		bWindowNamed = true;
+		GEngine->GameViewport->GetWindow()->SetTitle(FText::FromString(TEXT("Ports of Plague")));
+	}
 	TestScriptTick();
 	if (LobbyRoom.IsValid()) { LobbyRoom->Tick(FPlatformTime::Seconds()); TestLobbyPlay(); }
 	if (Room.IsValid())

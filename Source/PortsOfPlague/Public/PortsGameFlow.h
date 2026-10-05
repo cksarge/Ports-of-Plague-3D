@@ -260,6 +260,7 @@ private:
 	bool bTestFlip = false;
 	bool bTestScrollEnd = false;
 	int32 MenuDueIn = 0;
+	bool bWindowNamed = false;
 	bool bTestLobbyPlay = false, bTestLobbyTimer = false;
 	int32 TestLobbyHumans = 1;
 	FString TestLobbySpec;
