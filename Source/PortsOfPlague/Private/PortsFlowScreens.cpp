@@ -13,6 +13,7 @@
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SEditableText.h"
 #include "Widgets/Input/SMenuAnchor.h"
+#include "Widgets/Layout/SBackgroundBlur.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SGridPanel.h"
@@ -62,9 +63,10 @@ namespace
 	}
 
 	// A whole screen: one illuminated frame in the middle, over a backdrop picture.
-	TSharedRef<SWidget> Page(const TSharedRef<SWidget>& Content, float Width, const TCHAR* Backdrop, bool bCoverMap, const TSharedPtr<SPortsRoot>& Root, bool bMiddle = false)
+	TSharedRef<SWidget> Page(const TSharedRef<SWidget>& Content, float Width, const TCHAR* Backdrop, bool bCoverMap, const TSharedPtr<SPortsRoot>& Root, bool bMiddle = false, bool bArrive = false)
 	{
-		const TSharedRef<SWidget> Frame = SNew(SBox).WidthOverride(Width)[ PortsUi::Frame(Content) ];
+		// bArrive: the page rises into place as a card does.
+		const TSharedRef<SWidget> Frame = SNew(SBox).WidthOverride(Width)[ bArrive ? PortsUi::Entrance(PortsUi::Frame(Content), 2) : PortsUi::Frame(Content) ];
 		const TSharedRef<SWidget> Back = SNew(SImage).Image(PortsUi::PictureBrush(Backdrop)).Visibility(bCoverMap ? EVisibility::Visible : EVisibility::HitTestInvisible);
 		if (bCoverMap) Root->MarkSolid(Back);
 		Root->MarkSolid(Frame);
@@ -216,8 +218,48 @@ namespace
 
 // ---------- Menu ----------
 
-void UPortsGameFlow::ShowMenu()
+// ---------- The start screen ----------
+
+void UPortsGameFlow::ShowStart(const TSharedPtr<SWidget>& Over)
 {
+	bInGame = false;
+	bStartScreen = true;
+	StartLeftAt = 0;
+	SetSidePanel(Map, false);
+	if (APortsCameraPawn* Pawn = Camera()) Pawn->SetLocked(true);
+	FPortsData::EnsureLoaded();
+	TWeakObjectPtr<UPortsGameFlow> Weak(this);
+	// The map behind is out of focus until Start is pressed, then clears.
+	const auto Blur = [Weak]() { return Weak.IsValid() ? Weak->StartBlur() : 0.f; };
+	const TSharedRef<SWidget> Content = SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)[ PortsUi::ShimmerTitle(FPortsData::Get().Config().Get(TEXT("title")).AsString(), 170) ]
+		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 34, 0, 0)
+		[
+			SNew(SBox).MinDesiredWidth(260)[ PortsUi::Button(TEXT("Start  <lsmall>Enter</>"), [this]() { LeaveStart(); }, EButton::Primary) ]
+		];
+	StartContent = Content;
+	const TSharedRef<SOverlay> Screen = SNew(SOverlay)
+		+ SOverlay::Slot()[ SNew(SBackgroundBlur).BlurStrength_Lambda(Blur).bApplyAlphaToBlur(false).Visibility(EVisibility::Visible) ]
+		+ SOverlay::Slot()[ SNew(SImage).Image(PortsUi::PictureBrush(TEXT("bg_title_veil"))).Visibility(EVisibility::HitTestInvisible) ]
+		+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)[ Content ];
+	// The splash screen, if there is one, lies over all of this and fades away onto it.
+	if (Over.IsValid()) Screen->AddSlot()[ Over.ToSharedRef() ];
+	Root->MarkSolid(Screen);
+	Root->SetScreen(Screen);
+	Root->MarkSolid(Screen);
+}
+
+void UPortsGameFlow::LeaveStart()
+{
+	if (!bStartScreen || StartLeftAt > 0 || SplashUntil > 0) return;
+	StartLeftAt = FPlatformTime::Seconds();
+}
+
+void UPortsGameFlow::ShowMenu(bool bArrive)
+{
+	bStartScreen = false;
+	StartContent.Reset();
+	if (APortsCameraPawn* Pawn = Camera()) Pawn->SetLocked(false);
 	bInGame = false;
 	bResults = false;
 	bPlagueCard = false;
@@ -272,7 +314,13 @@ void UPortsGameFlow::ShowMenu()
 	}
 	Doc.Space(8);
 	const TSharedRef<SWidget> Built = Doc.Build(740 - 58);
-	Root->SetScreen(Page(Built, 740, TEXT("bg_title_veil"), false, Root, true));
+	const TSharedRef<SWidget> Menu = Page(Built, 740, TEXT("bg_title_veil"), false, Root, true, bArrive);
+	if (!bArrive) { Root->SetScreen(Menu); return; }
+	// Coming from the start screen, the map goes on coming into focus behind the card as it rises.
+	TWeakObjectPtr<UPortsGameFlow> Weak(this);
+	Root->SetScreen(SNew(SOverlay)
+		+ SOverlay::Slot()[ SNew(SBackgroundBlur).BlurStrength_Lambda([Weak]() { return Weak.IsValid() ? Weak->StartBlur() : 0.f; }).bApplyAlphaToBlur(false).Visibility(EVisibility::HitTestInvisible) ]
+		+ SOverlay::Slot()[ Menu ]);
 }
 
 // ---------- New game ----------

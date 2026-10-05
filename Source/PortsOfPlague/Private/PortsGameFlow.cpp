@@ -1,5 +1,8 @@
 #include "PortsGameFlow.h"
 
+#include "PortsSplash.h"
+#include "Misc/ConfigCacheIni.h"
+
 #include "PortsCameraPawn.h"
 #include "PortsMapActor.h"
 #include "PortsMapSpace.h"
@@ -53,6 +56,25 @@ void UPortsGameFlow::Start(APortsMapActor* InMap)
 	// The menu is drawn a few frames in, once the window knows how sharp its screen is: drawn at once, its text is
 	// measured for an ordinary screen and shifts a little when the Retina measurements arrive.
 	MenuDueIn = 3;
+}
+
+// Which splash screen opens the game: "official", "custom" or none ([PortsOfPlague.Splash] Style in DefaultGame.ini;
+// -PortsSplash=... on the command line says otherwise). Games started for checking go straight in.
+FString UPortsGameFlow::SplashStyle() const
+{
+	FString Style;
+	if (FParse::Value(FCommandLine::Get(), TEXT("PortsSplash="), Style)) return Style.ToLower();
+	if (FString(FCommandLine::Get()).Contains(TEXT("PortsTest=")) || FString(FCommandLine::Get()).Contains(TEXT("PortsPress="))) return FString();
+	GConfig->GetString(TEXT("PortsOfPlague.Splash"), TEXT("Style"), Style, GGameIni);
+	return Style.ToLower();
+}
+
+// How out of focus the map behind the start screen is: fully, until Start is pressed, then easing to sharp.
+float UPortsGameFlow::StartBlur() const
+{
+	constexpr float Full = 14.f;
+	if (StartLeftAt <= 0) return bStartScreen ? Full : 0.f;
+	return Full * (1.f - FMath::SmoothStep(0.f, 1.f, static_cast<float>((FPlatformTime::Seconds() - StartLeftAt) / StartClearSeconds)));
 }
 
 void UPortsGameFlow::Stop()
@@ -694,7 +716,12 @@ void UPortsGameFlow::OnMapClicked(const FVector2D& Pixel)
 void UPortsGameFlow::HandleKeys()
 {
 	const APlayerController* PC = Map && Map->GetWorld() ? Map->GetWorld()->GetFirstPlayerController() : nullptr;
-	if (!PC || !Root.IsValid() || Finale.IsValid()) return;
+	if (!PC || !Root.IsValid() || Finale.IsValid() || SplashUntil > 0) return;
+	if (bStartScreen)
+	{
+		if (PC->WasInputKeyJustPressed(EKeys::Enter) || PC->WasInputKeyJustPressed(EKeys::SpaceBar)) LeaveStart();
+		return;
+	}
 	if (PC->WasInputKeyJustPressed(EKeys::Escape) && Root->CancelTop()) return;
 	if (PC->WasInputKeyJustPressed(EKeys::Enter) && Root->ConfirmTop()) return;
 	if (Root->HasDialog()) return;
@@ -724,7 +751,37 @@ void UPortsGameFlow::HandleKeys()
 void UPortsGameFlow::Tick(float DeltaSeconds)
 {
 	if (!Root.IsValid() || !Map) return;
-	if (MenuDueIn > 0 && --MenuDueIn == 0 && !bInGame && !SetupForm.IsValid() && !Finale.IsValid()) ShowMenu();
+	if (MenuDueIn > 0 && --MenuDueIn == 0 && !bInGame && !SetupForm.IsValid() && !Finale.IsValid())
+	{
+		// The game opens on its splash screen, if it has one, which fades away onto the start screen. Games and
+		// screens opened for checking go straight to the menu (-PortsStart asks for the start screen all the same).
+		const FString Splash = SplashStyle();
+		const FString Line = FCommandLine::Get();
+		const bool bChecking = (Line.Contains(TEXT("PortsTest=")) || Line.Contains(TEXT("PortsPress="))) && !Line.Contains(TEXT("PortsSplash=")) && !FParse::Param(*Line, TEXT("PortsStart"));
+		if (bChecking) ShowMenu();
+		else if (Splash == TEXT("official") || Splash == TEXT("custom"))
+		{
+			const bool bCustom = Splash == TEXT("custom");
+			SplashUntil = FPlatformTime::Seconds() + SPortsSplash::Seconds(bCustom);
+			ShowStart(SNew(SPortsSplash).Custom(bCustom));
+		}
+		else ShowStart();
+	}
+	if (SplashUntil > 0 && FPlatformTime::Seconds() >= SplashUntil) SplashUntil = 0;
+	// Start has been pressed. The title fades first; the menu's card rises while the map is still coming into
+	// focus, and the blur goes on clearing behind it, so nothing changes all at once.
+	if (StartLeftAt > 0)
+	{
+		const double Since = FPlatformTime::Seconds() - StartLeftAt;
+		if (StartContent.IsValid()) StartContent->SetRenderOpacity(1.f - FMath::SmoothStep(0.f, 1.f, static_cast<float>(Since / StartTitleSeconds)));
+		if (bStartScreen && Since >= StartTitleSeconds)
+		{
+			bStartScreen = false;
+			StartContent.Reset();
+			if (!bInGame && !SetupForm.IsValid() && !Finale.IsValid()) ShowMenu(true);
+		}
+		if (Since >= StartClearSeconds) StartLeftAt = 0;
+	}
 	// The window is named for the game, not for the project file and the kind of build.
 	if (!bWindowNamed && !GIsEditor && GEngine && GEngine->GameViewport && GEngine->GameViewport->GetWindow().IsValid())
 	{

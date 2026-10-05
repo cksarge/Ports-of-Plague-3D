@@ -1,0 +1,9 @@
+TRADEMARKS
+
+Ports of Plague uses Unreal(R) Engine. Unreal(R), Unreal Engine(R), and the Unreal Engine(R) logo are trademarks or registered trademarks of Epic Games, Inc. in the United States of America and elsewhere. Other brands or product names are the trademarks of their respective owners. Ports of Plague is not endorsed by Epic Games.
+
+The game opens with Epic's Unreal Engine splash-screen logo, shown unaltered with its trademark notice, under Epic's Trademark License Agreement (requested October 2026).
+
+A gold version of the logo is also built in but switched off. It is a customization and may only be shown after Epic approves it in writing. To switch, change "Style=" under [PortsOfPlague.Splash] in Config/DefaultGame.ini to official, custom or none, and package the game again.
+
+Epic's rules: https://brand.epicgames.com/document/382#/-/trademark-license

@@ -186,6 +186,7 @@ namespace PortsUi
 	void SetDiceStill(bool bStill);
 
 	// A page or card arriving: 0 rises into place (dialog in game.css), 1 is a card turned over from its back (.card).
+	// 2 rises as 0 does, but unhurried (the menu arriving from the start screen).
 	TSharedRef<SWidget> Entrance(const TSharedRef<SWidget>& Content, int32 Kind, float Delay = 0.f);
 
 	struct FTheme { FLinearColor Main; FLinearColor Light; FString Label; };

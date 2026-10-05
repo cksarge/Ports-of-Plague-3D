@@ -8,7 +8,7 @@ Play the web version at https://portsofplague.carterscoding.com/. Its repository
 
 ## Play
 
-Download **PortsOfPlague.app** from the [Releases](https://github.com/cksarge/Ports-of-Plague-3D/releases) page and open it. It runs on a Mac with Apple silicon (macOS 14 or later) and needs no installation. The first time, macOS may ask you to confirm that you want to open it.
+Download the disk image (**.dmg**) from the [Releases](https://github.com/cksarge/Ports-of-Plague-3D/releases) page, open it, and drag **Ports of Plague** onto the Applications folder beside it. It runs on a Mac with Apple silicon (macOS 14 or later). The first time, macOS may ask you to confirm that you want to open it.
 
 There is no Windows build yet.
 
@@ -59,6 +59,7 @@ Close the Unreal editor before running any of these.
 | `Tools/test.sh` | runs the rules tests |
 | `node Tools/nettest/devices.mjs --code=XXXX` | joins a running game's room as several players' devices and plays it, to check multi-device play (see the top of the file) |
 | `Tools/package_mac.sh` | makes `Saved/Package/Mac/PortsOfPlague.app` |
+| `Tools/make_dmg.sh` | makes the disk image people download, `Saved/Package/Ports-of-Plague.dmg`, from that app |
 | `Tools/sync_data.sh` | copies the web version's data files into `Content/Data` (`--check` only compares) |
 | `Tools/build_content.sh` | makes the materials and imports the textures, music and sounds |
 
@@ -91,6 +92,10 @@ Ports of Plague was made by Carter K, Landon S, Valen H and John-Paul T for a hi
 Ports of Plague uses Unreal® Engine. Unreal® is a trademark or registered trademark of Epic Games, Inc. in the United States of America and elsewhere.
 
 Unreal® Engine, Copyright 1998 – 2026, Epic Games, Inc. All rights reserved.
+
+## Trademarks
+
+The game opens with the Unreal Engine splash screen. See [TRADEMARKS.txt](TRADEMARKS.txt).
 
 ## License
 

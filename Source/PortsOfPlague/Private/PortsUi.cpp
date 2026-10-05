@@ -457,7 +457,7 @@ public:
 	void Construct(const FArguments& Args)
 	{
 		Kind = Args._Kind;
-		Duration = Kind == 1 ? 0.7f : 0.28f;
+		Duration = Kind == 1 ? 0.7f : Kind == 2 ? 0.85f : 0.28f;
 		Start = FSlateApplication::Get().GetCurrentTime() + Args._Delay;
 		Back = MakeShared<FSlateRoundedBoxBrush>(PortsUi::Color(TEXT("#6a120c")), 14.f, PortsUi::Color(TEXT("#d9a82b")), 3.f);
 		Inner = MakeShared<FSlateRoundedBoxBrush>(FLinearColor::Transparent, 9.f, PortsUi::Color(TEXT("#f3d27a")), 2.f);

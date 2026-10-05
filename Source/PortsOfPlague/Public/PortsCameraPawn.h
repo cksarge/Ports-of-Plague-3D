@@ -36,6 +36,8 @@ public:
 	// Back to the whole map, by the game rather than the player.
 	void FrameWholeMap();
 	bool IsUserView() const { return bUserView; }
+	// While locked, the mouse and keys do not move the map (the start screen).
+	void SetLocked(bool bLock) { bLocked = bLock; }
 
 	// A staged shot for the finale: looks at a map point from a chosen distance (as a zoom, which may be closer
 	// than the player can go), angle down and compass direction, gliding there. The player's hand is off the camera meanwhile.
@@ -73,6 +75,7 @@ private:
 	bool bSidePanel = false;
 	// The player has moved the camera themselves since they last asked for the whole map.
 	bool bUserView = false;
+	bool bLocked = false;
 	// How quickly the camera closes on where it is going: quick under the hand, slower when the game moves it.
 	double GlideRate = 10.0;
 

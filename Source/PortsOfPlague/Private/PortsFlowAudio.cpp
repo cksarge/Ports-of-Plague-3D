@@ -90,6 +90,8 @@ FString UPortsGameFlow::SongWanted() const
 {
 	// Music switched off: nothing.
 	if (!bMusicOn) return FString();
+	// The splash screen is silent; the menu's song begins with the menu.
+	if (SplashUntil > 0) return FString();
 	// The game is over: the ending song, through the finale and the results page.
 	if (Finale.IsValid() || bResults) return TEXT("ending");
 	// Not in a game (title screen, new-game screen): the menu song.

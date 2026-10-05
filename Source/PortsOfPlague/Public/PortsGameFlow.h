@@ -54,7 +54,11 @@ public:
 
 private:
 	// ---------- Screens (PortsFlowScreens.cpp) ----------
-	void ShowMenu();
+	// bArrive: the menu's card rises into place (coming from the start screen).
+	void ShowMenu(bool bArrive = false);
+	// The start screen: the title and a Start button over the blurred map, which cannot be moved until Start is pressed.
+	void ShowStart(const TSharedPtr<SWidget>& Over = nullptr);
+	void LeaveStart();
 	void ShowSetup();
 	void BeginGame(const FPortsSetup& Setup, bool bHints);
 	void ContinueSaved();
@@ -261,6 +265,16 @@ private:
 	bool bTestScrollEnd = false;
 	int32 MenuDueIn = 0;
 	bool bWindowNamed = false;
+	// The splash screen is up until this time (0: it is not).
+	double SplashUntil = 0;
+	bool bStartScreen = false;
+	// When Start was pressed (0: not yet): the blur clears and the title fades from then.
+	double StartLeftAt = 0;
+	TSharedPtr<SWidget> StartContent;
+	// After Start: the title takes this long to fade, and the map this long to come into focus.
+	static constexpr double StartTitleSeconds = 0.6, StartClearSeconds = 1.5;
+	float StartBlur() const;
+	FString SplashStyle() const;
 	bool bTestLobbyPlay = false, bTestLobbyTimer = false;
 	int32 TestLobbyHumans = 1;
 	FString TestLobbySpec;

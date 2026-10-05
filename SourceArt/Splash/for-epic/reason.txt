@@ -1,0 +1,7 @@
+Ports of Plague is a free, educational 3D board game about the Black Death (1347-1353), made by high-school students for a history class and built with Unreal Engine 5.
+
+We would like to show the Unreal Engine splash-screen logo when the game opens, to credit the engine. It is shown alone, centred, at half the height of the screen, with the required trademark notice beneath it.
+
+We are also asking for approval of a customised version: the same logo, unaltered in shape, recoloured in the game's gold on a dark background. Its outline is drawn in, gold fills it, and it ends on the complete, legible logo. Nothing is added to the logo. This is to match the game's illuminated-manuscript style.
+
+Screenshots of both versions are attached.

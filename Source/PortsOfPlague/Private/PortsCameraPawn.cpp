@@ -198,7 +198,7 @@ bool APortsCameraPawn::GroundUnderCursor(FVector2D& OutPixel) const
 void APortsCameraPawn::ReadInput(float DeltaSeconds)
 {
 	const APlayerController* PC = Cast<APlayerController>(GetController());
-	if (!PC) return;
+	if (!PC || bLocked) return;
 
 	FVector2D Move(0, 0);
 	if (PC->IsInputKeyDown(EKeys::Right) || PC->IsInputKeyDown(EKeys::D)) Move.X += 1;
