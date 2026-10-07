@@ -10,6 +10,7 @@
 //   see:Some text     wait until this text is on screen
 //   gone:Some text    wait until this text is no longer on screen
 //   wait:3            wait this many seconds
+//   scroll:-8         turn the mouse wheel eight notches down the page (a positive number: up)
 //   shot:file.png     save a picture of the screen
 //   quit              close the game
 #include "PortsGameFlow.h"
@@ -171,6 +172,24 @@ void UPortsGameFlow::TestScriptTick()
 	const FString Step = TestSteps[TestStep].TrimStartAndEnd();
 	FString Said;
 	bool bDone = false;
+	if (Step.StartsWith(TEXT("scroll:")))
+	{
+		// Turns the mouse wheel in the middle of the game's window: scroll:-8 is eight notches down the page.
+		FSlateApplication& App = FSlateApplication::Get();
+		const TArray<TSharedRef<SWindow>> Open = Windows();
+		if (Open.Num())
+		{
+			const FVector2D Middle = Open[0]->GetRectInScreen().GetCenter();
+			const int32 Notches = FCString::Atoi(*Step.Mid(7));
+			App.ProcessMouseMoveEvent(FPointerEvent(0, Middle, Middle, TSet<FKey>(), EKeys::Invalid, 0, FModifierKeysState()));
+			for (int32 i = 0; i < FMath::Abs(Notches); i++) App.ProcessMouseWheelOrGestureEvent(FPointerEvent(0, Middle, Middle, TSet<FKey>(), EKeys::Invalid, Notches < 0 ? -1.f : 1.f, FModifierKeysState()), nullptr);
+		}
+		UE_LOG(LogTemp, Display, TEXT("PortsPress: %d ok: %s"), TestStep + 1, *Step);
+		TestStep++;
+		TestStepGiveUp = 0;
+		TestStepAt = Time + 0.7;
+		return;
+	}
 	if (Step.StartsWith(TEXT("wait:"))) { TestStepAt = Time + FCString::Atod(*Step.Mid(5)); TestStepGiveUp = 0; TestStep++; return; }
 	if (Step.StartsWith(TEXT("key:"))) { Key(Step.Mid(4), true); TestKeyUp = Step.Mid(4); bDone = true; }
 	else if (Step.StartsWith(TEXT("see:"))) { bDone = ScreenText().Contains(Step.Mid(4), ESearchCase::CaseSensitive); Said = TEXT("that text is not on screen"); }

@@ -98,6 +98,25 @@ namespace
 		return FString::Printf(TEXT("{{%s}}"), *Path);
 	}
 
+	// Puts marked-up text in a style as a whole (a note in italic, a table's first cell in bold). One style
+	// inside another is not understood by the text drawing and would be shown as written, so only the stretches
+	// that have no style of their own are given this one; those that have keep theirs.
+	FString Styled(const FString& Markup, const TCHAR* Tag)
+	{
+		FString Out;
+		const auto Plain = [&Out, Tag](const FString& Part) { if (!Part.IsEmpty()) Out += FString::Printf(TEXT("<%s>%s</>"), Tag, *Part); };
+		for (int32 i = 0; i < Markup.Len();)
+		{
+			const int32 Open = Markup.Find(TEXT("<"), ESearchCase::CaseSensitive, ESearchDir::FromStart, i);
+			const int32 Close = Open == INDEX_NONE ? INDEX_NONE : Markup.Find(TEXT("</>"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Open);
+			if (Open == INDEX_NONE || Close == INDEX_NONE) { Plain(Markup.Mid(i)); break; }
+			Plain(Markup.Mid(i, Open - i));
+			Out += Markup.Mid(Open, Close + 3 - Open);
+			i = Close + 3;
+		}
+		return Out;
+	}
+
 	// Rule text: fills {{config.path}} and {{fact:ID}}, then **bold** and *italic* (render/template.js).
 	FString RuleText(const FString& Text)
 	{
@@ -1383,7 +1402,8 @@ void UPortsGameFlow::ShowRules()
 		{
 			const FString Type = B.Get(TEXT("type")).AsString();
 			if (Type == TEXT("p")) Doc->P(RuleText(B.Get(TEXT("text")).AsString()));
-			else if (Type == TEXT("note")) Doc->P(FString::Printf(TEXT("<i>%s</>"), *RuleText(B.Get(TEXT("text")).AsString()).Replace(TEXT("<i>"), TEXT("<b>"))));
+			// A note is in italic; what the rule book stresses inside one stands out in bold instead.
+			else if (Type == TEXT("note")) Doc->P(Styled(RuleText(B.Get(TEXT("text")).AsString()).Replace(TEXT("<i>"), TEXT("<b>")), TEXT("i")));
 			else if (Type == TEXT("list"))
 			{
 				TArray<FString> Items;
@@ -1395,12 +1415,13 @@ void UPortsGameFlow::ShowRules()
 				// Each column's share of the page is known before anything is drawn, so no cell re-wraps afterwards.
 				TArray<TArray<FString>> Table;
 				TArray<FString> Head;
-				for (const V& Cell : B.Get(TEXT("head")).GetItems()) Head.Add(FString::Printf(TEXT("<caps>%s</>"), *RuleText(Cell.AsString())));
+				for (const V& Cell : B.Get(TEXT("head")).GetItems()) Head.Add(Styled(RuleText(Cell.AsString()), TEXT("caps")));
 				Table.Add(Head);
 				for (const V& RowCells : B.Get(TEXT("rows")).GetItems())
 				{
 					TArray<FString> Line;
-					for (int32 c = 0; c < RowCells.Num(); c++) Line.Add(c == 0 ? FString::Printf(TEXT("<b>%s</>"), *RuleText(RowCells[c].AsString())) : RuleText(RowCells[c].AsString()));
+					// A row's first cell is in bold ("**Ship Goods** (1)" is already partly so).
+					for (int32 c = 0; c < RowCells.Num(); c++) Line.Add(c == 0 ? Styled(RuleText(RowCells[c].AsString()), TEXT("b")) : RuleText(RowCells[c].AsString()));
 					Table.Add(Line);
 				}
 				Doc->AddBuilt([Table](float W)
@@ -1420,7 +1441,7 @@ void UPortsGameFlow::ShowRules()
 			}
 			else if (Type == TEXT("defs"))
 			{
-				for (const V& Item : B.Get(TEXT("items")).GetItems()) Doc->P(FString::Printf(TEXT("<b>%s</>  %s"), *RuleText(Item[0].AsString()), *RuleText(Item[1].AsString())));
+				for (const V& Item : B.Get(TEXT("items")).GetItems()) Doc->P(FString::Printf(TEXT("%s  %s"), *Styled(RuleText(Item[0].AsString()), TEXT("b")), *RuleText(Item[1].AsString())));
 			}
 		}
 	}
