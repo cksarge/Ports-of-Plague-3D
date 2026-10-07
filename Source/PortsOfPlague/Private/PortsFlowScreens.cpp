@@ -916,7 +916,22 @@ void UPortsGameFlow::LeaveGame()
 
 TSharedRef<SWidget> UPortsGameFlow::BuildGameScreen()
 {
-	const TSharedRef<SWidget> Top = SAssignNew(TopBarSlot, SBox);
+	// The top bar scrolls sideways when the window is too narrow to hold all of it (the mouse wheel or two fingers,
+	// with the pointer over the bar), so its last buttons can always be reached. The bar is redrawn often; the
+	// place it has been scrolled to is kept, because only what is inside this box is replaced.
+	TWeakPtr<SPortsRoot> WeakRoot = Root;
+	const TSharedRef<SWidget> Top = SNew(SScrollBox)
+		.Orientation(Orient_Horizontal)
+		.ScrollBarVisibility(EVisibility::Collapsed)
+		.ConsumeMouseWheel(EConsumeMouseWheel::Always)
+		+ SScrollBox::Slot()
+		[
+			// Never narrower than the window, so a bar that fits still runs from edge to edge.
+			SNew(SBox).MinDesiredWidth_Lambda([WeakRoot]() { const TSharedPtr<SPortsRoot> R = WeakRoot.Pin(); return FOptionalSize(R.IsValid() ? R->GetCachedGeometry().GetLocalSize().X : 0.f); })
+			[
+				SAssignNew(TopBarSlot, SBox)
+			]
+		];
 	// The side panel sits on the walnut table, as the website's does. Its scroll bar lies over the
 	// panel's right margin, so the panels are the same width whether or not there is anything to scroll.
 	const TSharedRef<SScrollBar> SideBar = SNew(SScrollBar);

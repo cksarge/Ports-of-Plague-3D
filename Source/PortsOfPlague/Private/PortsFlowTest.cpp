@@ -11,6 +11,7 @@
 //   gone:Some text    wait until this text is no longer on screen
 //   wait:3            wait this many seconds
 //   scroll:-8         turn the mouse wheel eight notches down the page (a positive number: up)
+//   scrollat:Rules:-8 the same with the pointer over the button whose label starts "Rules"
 //   shot:file.png     save a picture of the screen
 //   quit              close the game
 #include "PortsGameFlow.h"
@@ -172,19 +173,38 @@ void UPortsGameFlow::TestScriptTick()
 	const FString Step = TestSteps[TestStep].TrimStartAndEnd();
 	FString Said;
 	bool bDone = false;
-	if (Step.StartsWith(TEXT("scroll:")))
+	if (Step.StartsWith(TEXT("scroll:")) || Step.StartsWith(TEXT("scrollat:")))
 	{
-		// Turns the mouse wheel in the middle of the game's window: scroll:-8 is eight notches down the page.
+		// Turns the mouse wheel: scroll:-8 is eight notches down the page with the pointer in the middle of the
+		// game's window; scrollat:Rules:-8 does it with the pointer over the button whose label starts that way.
 		FSlateApplication& App = FSlateApplication::Get();
 		const TArray<TSharedRef<SWindow>> Open = Windows();
-		if (Open.Num())
+		FString Rest = Step.Mid(Step.Find(TEXT(":")) + 1), Label;
+		const bool bAt = Step.StartsWith(TEXT("scrollat:"));
+		if (bAt) Rest.Split(TEXT(":"), &Label, &Rest, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+		const int32 Notches = FCString::Atoi(*Rest);
+		bool bFound = !bAt;
+		FVector2D Where = Open.Num() ? FVector2D(Open[0]->GetRectInScreen().GetCenter()) : FVector2D::ZeroVector;
+		if (bAt)
 		{
-			const FVector2D Middle = Open[0]->GetRectInScreen().GetCenter();
-			const int32 Notches = FCString::Atoi(*Step.Mid(7));
-			App.ProcessMouseMoveEvent(FPointerEvent(0, Middle, Middle, TSet<FKey>(), EKeys::Invalid, 0, FModifierKeysState()));
-			for (int32 i = 0; i < FMath::Abs(Notches); i++) App.ProcessMouseWheelOrGestureEvent(FPointerEvent(0, Middle, Middle, TSet<FKey>(), EKeys::Invalid, Notches < 0 ? -1.f : 1.f, FModifierKeysState()), nullptr);
+			TArray<FFound> All;
+			for (const TSharedRef<SWindow>& Window : Open) Buttons(Window, All);
+			for (const FFound& F : All)
+			{
+				if (!F.Text.StartsWith(Label, ESearchCase::CaseSensitive)) continue;
+				const FGeometry& Geometry = F.Widget->GetTickSpaceGeometry();
+				Where = FVector2D(Geometry.GetAbsolutePosition()) + FVector2D(Geometry.GetAbsoluteSize()) * 0.5;
+				bFound = true;
+				break;
+			}
 		}
-		UE_LOG(LogTemp, Display, TEXT("PortsPress: %d ok: %s"), TestStep + 1, *Step);
+		if (bFound && Open.Num())
+		{
+			App.ProcessMouseMoveEvent(FPointerEvent(0, Where, Where, TSet<FKey>(), EKeys::Invalid, 0, FModifierKeysState()));
+			for (int32 i = 0; i < FMath::Abs(Notches); i++) App.ProcessMouseWheelOrGestureEvent(FPointerEvent(0, Where, Where, TSet<FKey>(), EKeys::Invalid, Notches < 0 ? -1.f : 1.f, FModifierKeysState()), nullptr);
+		}
+		if (bFound) { UE_LOG(LogTemp, Display, TEXT("PortsPress: %d ok: %s"), TestStep + 1, *Step); }
+		else { UE_LOG(LogTemp, Warning, TEXT("PortsPress: %d FAILED: %s (no such button on screen)"), TestStep + 1, *Step); }
 		TestStep++;
 		TestStepGiveUp = 0;
 		TestStepAt = Time + 0.7;
