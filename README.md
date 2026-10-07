@@ -28,7 +28,7 @@ Everyone watches the map on the big screen and takes their turn on their own dev
 
 ### Controls
 
-| | |
+| Action | Key |
 |---|---|
 | Move the map | drag, or the arrow keys or WASD |
 | Zoom | mouse wheel, two fingers on a trackpad, or **+** and **−** |
