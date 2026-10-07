@@ -1,8 +1,8 @@
-// The splash screen shown when the game opens: the Unreal Engine logo, laid out as Epic's guidelines for
-// splash screens ask (brand.epicgames.com, "Splash screen logo"), with the trademark notice under it.
+// The splash screen shown when the game opens: the Unreal Engine logo exactly as Epic supplies it, laid out as
+// Epic's guidelines for splash screens ask (brand.epicgames.com, "Splash screen logo"), with the trademark
+// notice under it. The logo may not be recoloured, redrawn or animated: Epic turned down a customized version.
 //
-// Which splash is shown, if any, is set in Config/DefaultGame.ini ([PortsOfPlague.Splash] Style). TRADEMARKS.txt
-// says what has to be agreed with Epic before each may be shown to the public.
+// Whether it is shown is set in Config/DefaultGame.ini ([PortsOfPlague.Splash] Style). See TRADEMARKS.txt.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -11,22 +11,18 @@
 class SPortsSplash : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SPortsSplash) : _Custom(false), _Blank(false), _Still(false) {}
-		// false: Epic's logo exactly as supplied, white on black. true: the same logo in the game's gold,
-		// drawn in and gilded (a customization, which needs Epic's written approval).
-		SLATE_ARGUMENT(bool, Custom)
-		// No logo and no notice: only the dark screen the game opens on, which then fades away.
+	SLATE_BEGIN_ARGS(SPortsSplash) : _Blank(false), _Still(false) {}
+		// No logo and no notice: only the black screen the game opens on, which then fades away.
 		SLATE_ARGUMENT(bool, Blank)
-		// The dark screen alone, staying as it is (the game's very first frames, before the splash begins).
+		// The black screen alone, staying as it is (the game's very first frames, before the splash begins).
 		SLATE_ARGUMENT(bool, Still)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& Args);
-	// How long the splash is on screen, in seconds.
-	static float Seconds(bool bCustom, bool bBlank = false) { return bBlank ? BlankSeconds : (bCustom ? 6.4f : 3.1f) + FadeSeconds; }
-	// Both hold the finished, still logo for the same 1.8 seconds before it goes. The official logo is whole from
-	// 0.7 seconds in; the custom one takes until 4 seconds in to be drawn and gilded, so it is that much longer.
-	// How long the dark screen takes to fade away at the end, onto the start screen.
+	// How long the splash is on screen, in seconds. The logo is whole from 0.7 seconds in and is held, still,
+	// for 1.8 seconds before it goes.
+	static float Seconds(bool bBlank = false) { return bBlank ? BlankSeconds : 3.1f + FadeSeconds; }
+	// How long the black screen takes to fade away at the end, onto the start screen.
 	static constexpr float FadeSeconds = 1.7f;
 	static constexpr float BlankSeconds = 0.3f + FadeSeconds;
 };

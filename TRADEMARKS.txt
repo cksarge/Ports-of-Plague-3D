@@ -4,6 +4,6 @@ Ports of Plague uses Unreal(R) Engine. Unreal(R), Unreal Engine(R), and the Unre
 
 The game opens with Epic's Unreal Engine splash-screen logo, shown unaltered with its trademark notice, under Epic's Trademark License Agreement (requested October 2026).
 
-A gold version of the logo is also built in but switched off. It is a customization and may only be shown after Epic approves it in writing. To switch, change "Style=" under [PortsOfPlague.Splash] in Config/DefaultGame.ini to official, custom or none, and package the game again.
+The logo must stay exactly as Epic supplies it. A recoloured version was submitted and Epic turned it down, so it has been removed from the game. To turn the splash off, set "Style=none" under [PortsOfPlague.Splash] in Config/DefaultGame.ini and package the game again.
 
 Epic's rules: https://brand.epicgames.com/document/382#/-/trademark-license

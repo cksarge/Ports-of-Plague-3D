@@ -60,10 +60,10 @@ void UPortsGameFlow::Start(APortsMapActor* InMap)
 	// glimpse of the map.
 	const FString Line = FCommandLine::Get();
 	const bool bChecking = (Line.Contains(TEXT("PortsTest=")) || Line.Contains(TEXT("PortsPress="))) && !Line.Contains(TEXT("PortsSplash=")) && !FParse::Param(*Line, TEXT("PortsStart"));
-	if (!bChecking) Root->SetScreen(SNew(SPortsSplash).Custom(SplashStyle() == TEXT("custom")).Still(true));
+	if (!bChecking) Root->SetScreen(SNew(SPortsSplash).Still(true));
 }
 
-// Which splash screen opens the game: "official", "custom" or none ([PortsOfPlague.Splash] Style in DefaultGame.ini;
+// Which splash screen opens the game: "official" or none ([PortsOfPlague.Splash] Style in DefaultGame.ini;
 // -PortsSplash=... on the command line says otherwise). Games started for checking go straight in.
 FString UPortsGameFlow::SplashStyle() const
 {
@@ -764,11 +764,10 @@ void UPortsGameFlow::Tick(float DeltaSeconds)
 		const FString Line = FCommandLine::Get();
 		const bool bChecking = (Line.Contains(TEXT("PortsTest=")) || Line.Contains(TEXT("PortsPress="))) && !Line.Contains(TEXT("PortsSplash=")) && !FParse::Param(*Line, TEXT("PortsStart"));
 		if (bChecking) ShowMenu();
-		else if (Splash == TEXT("official") || Splash == TEXT("custom"))
+		else if (Splash == TEXT("official"))
 		{
-			const bool bCustom = Splash == TEXT("custom");
-			SplashUntil = FPlatformTime::Seconds() + SPortsSplash::Seconds(bCustom);
-			ShowStart(SNew(SPortsSplash).Custom(bCustom));
+			SplashUntil = FPlatformTime::Seconds() + SPortsSplash::Seconds();
+			ShowStart(SNew(SPortsSplash));
 		}
 		else ShowStart(SNew(SPortsSplash).Blank(true));
 	}
