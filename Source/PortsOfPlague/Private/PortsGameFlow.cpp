@@ -1,4 +1,5 @@
 #include "PortsGameFlow.h"
+#include "PortsSettings.h"
 
 #include "PortsSplash.h"
 #include "Misc/ConfigCacheIni.h"
@@ -735,30 +736,25 @@ void UPortsGameFlow::HandleKeys()
 		if (PC->WasInputKeyJustPressed(EKeys::Enter) || PC->WasInputKeyJustPressed(EKeys::SpaceBar)) LeaveStart();
 		return;
 	}
+	// Settings is waiting for a key to be chosen: that key does nothing else.
+	if (SettingsKeyCapture()) return;
+	const FPortsSettings& Keys = FPortsSettings::Get();
 	if (PC->WasInputKeyJustPressed(EKeys::Escape) && Root->CancelTop()) return;
 	if (PC->WasInputKeyJustPressed(EKeys::Enter) && Root->ConfirmTop()) return;
 	if (Root->HasDialog()) return;
-	if (PC->WasInputKeyJustPressed(EKeys::R)) { ShowRules(); return; }
+	if (PC->WasInputKeyJustPressed(Keys.Key(TEXT("rules")))) { ShowRules(); return; }
 	if (!bInGame) return;
-	if (PC->WasInputKeyJustPressed(EKeys::J) && Ui.history) { ShowJournal(); return; }
-	if (PC->WasInputKeyJustPressed(EKeys::M)) { SetSoundOn(!bSoundOn); Notify(bSoundOn ? TEXT("Sound effects on") : TEXT("Sound effects off"), 1.2f); RefreshTopBar(); return; }
-	if (PC->WasInputKeyJustPressed(EKeys::N)) { SetMusicOn(!bMusicOn); Notify(bMusicOn ? TEXT("Music on") : TEXT("Music off"), 1.2f); RefreshTopBar(); return; }
+	if (PC->WasInputKeyJustPressed(Keys.Key(TEXT("journal"))) && Ui.history) { ShowJournal(); return; }
+	if (PC->WasInputKeyJustPressed(Keys.Key(TEXT("sound")))) { SetSoundOn(!bSoundOn); Notify(bSoundOn ? TEXT("Sound effects on") : TEXT("Sound effects off"), 1.2f); RefreshTopBar(); return; }
+	if (PC->WasInputKeyJustPressed(Keys.Key(TEXT("music")))) { SetMusicOn(!bMusicOn); Notify(bMusicOn ? TEXT("Music on") : TEXT("Music off"), 1.2f); RefreshTopBar(); return; }
 	const FPortsPlayer* P = Ports::CurrentPlayer(State);
 	if (State.phase != TEXT("actions") || Busy() || !P || P->bot) return;
-	struct FKeyRow { const TCHAR* Char; FKey Key; };
-	const FKeyRow Keys[] = {
-		{ TEXT("1"), EKeys::One }, { TEXT("2"), EKeys::Two }, { TEXT("3"), EKeys::Three }, { TEXT("4"), EKeys::Four }, { TEXT("5"), EKeys::Five }, { TEXT("6"), EKeys::Six },
-		{ TEXT("7"), EKeys::Seven }, { TEXT("8"), EKeys::Eight }, { TEXT("9"), EKeys::Nine }, { TEXT("0"), EKeys::Zero }, { TEXT("g"), EKeys::G },
-	};
-	for (const FKeyRow& Row : Keys)
+	for (const V& A : FPortsData::Get().Actions().GetItems())
 	{
-		if (!PC->WasInputKeyJustPressed(Row.Key)) continue;
-		for (const V& A : FPortsData::Get().Actions().GetItems())
-		{
-			if (A.Get(TEXT("key")).AsString().Equals(Row.Char, ESearchCase::IgnoreCase)) { StartAction(A.Get(TEXT("id")).AsString()); return; }
-		}
+		const FString Id = A.Get(TEXT("id")).AsString();
+		if (PC->WasInputKeyJustPressed(Keys.Key(FName(*Id)))) { StartAction(Id); return; }
 	}
-	if (PC->WasInputKeyJustPressed(EKeys::E)) TryEndTurn();
+	if (PC->WasInputKeyJustPressed(Keys.Key(TEXT("end")))) TryEndTurn();
 }
 
 void UPortsGameFlow::Tick(float DeltaSeconds)

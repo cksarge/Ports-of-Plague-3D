@@ -126,8 +126,8 @@ void UPortsGameFlow::BuildLesson(const FString& Id, FPortsDoc& Doc, FString& But
 		L.Title = TEXT("Your turn");
 		L.Paragraphs = {
 			FString::Printf(TEXT("You have <b>%d action points</> (AP). Your actions are listed %s; each one also has a key. Most actions take 1 AP; Open Trading Post and Move Family take %d."), Ap, *Where, PostAp),
-			FString::Printf(TEXT("Start with <key>1</> <b>Ship Goods</>: choose your trading post in %s, then a route leaving it. You earn the route's value plus the profit die. Sea routes are solid lines and land routes dashed lines; each shows its value."), Me ? *Esc(CityName(Me->home)) : TEXT("your home city")),
-			TEXT("When you have done all you want, press <key>E</> <b>End Turn</>. Unused action points are lost."),
+			FString::Printf(TEXT("Start with <key>{k:ship}</> <b>Ship Goods</>: choose your trading post in %s, then a route leaving it. You earn the route's value plus the profit die. Sea routes are solid lines and land routes dashed lines; each shows its value."), Me ? *Esc(CityName(Me->home)) : TEXT("your home city")),
+			TEXT("When you have done all you want, press <key>{k:end}</> <b>End Turn</>. Unused action points are lost."),
 		};
 		L.Button = TEXT("Take my turn");
 	}
@@ -144,7 +144,7 @@ void UPortsGameFlow::BuildLesson(const FString& Id, FPortsDoc& Doc, FString& But
 	{
 		L.Title = TEXT("A second trading post");
 		L.Paragraphs = {
-			FString::Printf(TEXT("<key>2</> <b>Open Trading Post</> takes %d AP and, this round, %dƒ. The new post must be in a city joined by a route to one of your posts, and it cannot be a Stricken city."), PostAp, Me ? Cost(State, TEXT("openPost"), Me) : Cfg(TEXT("costs.openPost"))),
+			FString::Printf(TEXT("<key>{k:post}</> <b>Open Trading Post</> takes %d AP and, this round, %dƒ. The new post must be in a city joined by a route to one of your posts, and it cannot be a Stricken city."), PostAp, Me ? Cost(State, TEXT("openPost"), Me) : Cfg(TEXT("costs.openPost"))),
 			FString::Printf(TEXT("A second post lets you ship from two places, opening it draws a Fortune card, and every post is worth %d Wealth point at the end. You may own at most %d."), Cfg(TEXT("scoring.pointsPerPost")), Cfg(TEXT("limits.maxPosts"))),
 		};
 	}
@@ -187,9 +187,9 @@ void UPortsGameFlow::BuildLesson(const FString& Id, FPortsDoc& Doc, FString& But
 		L.Title = TEXT("Your family is in danger");
 		L.Paragraphs = { FString::Printf(TEXT("%s is Stricken, and your family lives there. In the plague phase each family member in a Stricken city rolls the mortality die: equal to or lower than the city's severity, and that family member dies. You can:"), City.IsEmpty() ? TEXT("One of your cities") : *Esc(CityName(City))) };
 		L.Bullets = {
-			FString::Printf(TEXT("<key>3</> <b>Move Family</> (%d AP): move up to %d of them to another of your cities or to your Country Estate. Leaving a Stricken city is fleeing and costs %d reputation. Family at the Estate is safe from the plague, but earns no family bonus."), Cfg(TEXT("actionPointCosts.move")), Cfg(TEXT("limits.moveFamilyMax")), Cfg(TEXT("penalties.fleeReputation"))),
-			FString::Printf(TEXT("<key>4</> <b>Prepare Household</> (1 AP, %dƒ): this round their survival rolls there get +%d."), Cfg(TEXT("costs.prepareHousehold")), Cfg(TEXT("plague.prepareBonus"))),
-			FString::Printf(TEXT("<key>5</> <b>Consult Physician</> (1 AP, %dƒ): this round, the first family member there who would die rolls again and survives on a %d."), Cfg(TEXT("costs.physician")), Cfg(TEXT("plague.physicianSaveOn"))),
+			FString::Printf(TEXT("<key>{k:move}</> <b>Move Family</> (%d AP): move up to %d of them to another of your cities or to your Country Estate. Leaving a Stricken city is fleeing and costs %d reputation. Family at the Estate is safe from the plague, but earns no family bonus."), Cfg(TEXT("actionPointCosts.move")), Cfg(TEXT("limits.moveFamilyMax")), Cfg(TEXT("penalties.fleeReputation"))),
+			FString::Printf(TEXT("<key>{k:prepare}</> <b>Prepare Household</> (1 AP, %dƒ): this round their survival rolls there get +%d."), Cfg(TEXT("costs.prepareHousehold")), Cfg(TEXT("plague.prepareBonus"))),
+			FString::Printf(TEXT("<key>{k:physician}</> <b>Consult Physician</> (1 AP, %dƒ): this round, the first family member there who would die rolls again and survives on a %d."), Cfg(TEXT("costs.physician")), Cfg(TEXT("plague.physicianSaveOn"))),
 		};
 		L.After = { TEXT("Or stay and trade. A house's last family member never dies, and no one is ever knocked out of the game.") };
 	}
@@ -211,7 +211,7 @@ void UPortsGameFlow::BuildLesson(const FString& Id, FPortsDoc& Doc, FString& But
 			FString::Printf(TEXT("<b>Reputation:</> 1 per reputation point up to %d, then 1 per %d points above that."), Cfg(TEXT("scoring.reputationSoftCap")), Cfg(TEXT("scoring.reputationHighRate"))),
 			TEXT("<b>Balance bonus:</> your lowest of the three, added again."),
 		};
-		L.After = { FString::Printf(TEXT("If reputation is your weakest, <key>6</> <b>Charity & Piety</> (1 AP, %dƒ) gives +%d reputation, once per turn."), Cfg(TEXT("costs.charity")), Cfg(TEXT("gains.charityReputation"))) };
+		L.After = { FString::Printf(TEXT("If reputation is your weakest, <key>{k:charity}</> <b>Charity & Piety</> (1 AP, %dƒ) gives +%d reputation, once per turn."), Cfg(TEXT("costs.charity")), Cfg(TEXT("gains.charityReputation"))) };
 	}
 	else if (Id == TEXT("aftermath"))
 	{
@@ -220,8 +220,8 @@ void UPortsGameFlow::BuildLesson(const FString& Id, FPortsDoc& Doc, FString& But
 		L.Title = TEXT("Aftermath");
 		L.Paragraphs = { FString::Printf(TEXT("The plague has passed through %s, which is now in <b>Aftermath</> (grey ring): workers are scarce and prices are high. Shipping to an Aftermath city earns %d more; shipping from one costs a wage of %d. Two actions open up where you have a post in such a city:"), City.IsEmpty() ? TEXT("one of your cities") : *Esc(CityName(City)), Cfg(TEXT("gains.aftermathPriceBonus")), Cfg(TEXT("costs.wageAftermath"))) };
 		L.Bullets = {
-			FString::Printf(TEXT("<key>7</> <b>Arrange a Marriage</> (1 AP, %dƒ), where you also have family: +%d family member there. Your family cannot grow beyond %d. Once per turn."), Cfg(TEXT("costs.marriage")), Cfg(TEXT("gains.marriageFamily")), Cfg(TEXT("start.family"))),
-			FString::Printf(TEXT("<key>8</> <b>Buy Abandoned Land</> (1 AP, %dƒ), one holding per city: worth %d Wealth points at the end, but you pay %dƒ per holding in every plague phase."), Cfg(TEXT("costs.buyLand")), Cfg(TEXT("scoring.pointsPerLand")), Cfg(TEXT("costs.landWage"))),
+			FString::Printf(TEXT("<key>{k:marry}</> <b>Arrange a Marriage</> (1 AP, %dƒ), where you also have family: +%d family member there. Your family cannot grow beyond %d. Once per turn."), Cfg(TEXT("costs.marriage")), Cfg(TEXT("gains.marriageFamily")), Cfg(TEXT("start.family"))),
+			FString::Printf(TEXT("<key>{k:land}</> <b>Buy Abandoned Land</> (1 AP, %dƒ), one holding per city: worth %d Wealth points at the end, but you pay %dƒ per holding in every plague phase."), Cfg(TEXT("costs.buyLand")), Cfg(TEXT("scoring.pointsPerLand")), Cfg(TEXT("costs.landWage"))),
 		};
 	}
 	else if (Id == TEXT("more"))
@@ -229,11 +229,11 @@ void UPortsGameFlow::BuildLesson(const FString& Id, FPortsDoc& Doc, FString& But
 		L.Title = TEXT("More you can do");
 		L.Paragraphs = { TEXT("Three actions you have not needed yet:") };
 		L.Bullets = {
-			FString::Printf(TEXT("<key>9</> <b>Take a Loan</> (no AP): borrow %dƒ now and repay %dƒ in the plague phase of the next round. One loan at a time; not in the final round."), Cfg(TEXT("gains.loan")), Cfg(TEXT("costs.loanRepay"))),
-			FString::Printf(TEXT("<key>0</> <b>Propose a Partnership</> (no AP): until the end of the next round, when either partner ships to a city where the other has a post, the shipper earns %dƒ more and the partner %dƒ."), Cfg(TEXT("gains.dealShipperBonus")), Cfg(TEXT("gains.dealBonus"))),
-			FString::Printf(TEXT("<key>G</> <b>Close Your Gates</> (1 AP, −%d reputation): until the end of the next round, rival houses cannot open a post in that city and earn %dƒ less shipping to it."), Cfg(TEXT("penalties.gatesReputation")), Cfg(TEXT("penalties.gatesProfit"))),
+			FString::Printf(TEXT("<key>{k:loan}</> <b>Take a Loan</> (no AP): borrow %dƒ now and repay %dƒ in the plague phase of the next round. One loan at a time; not in the final round."), Cfg(TEXT("gains.loan")), Cfg(TEXT("costs.loanRepay"))),
+			FString::Printf(TEXT("<key>{k:deal}</> <b>Propose a Partnership</> (no AP): until the end of the next round, when either partner ships to a city where the other has a post, the shipper earns %dƒ more and the partner %dƒ."), Cfg(TEXT("gains.dealShipperBonus")), Cfg(TEXT("gains.dealBonus"))),
+			FString::Printf(TEXT("<key>{k:gates}</> <b>Close Your Gates</> (1 AP, −%d reputation): until the end of the next round, rival houses cannot open a post in that city and earn %dƒ less shipping to it."), Cfg(TEXT("penalties.gatesReputation")), Cfg(TEXT("penalties.gatesProfit"))),
 		};
-		L.After = { TEXT("Every rule is in <b>Rules</> (<key>R</>) whenever you want to check one.") };
+		L.After = { TEXT("Every rule is in <b>Rules</> (<key>{k:rules}</>) whenever you want to check one.") };
 	}
 	else if (Id == TEXT("final"))
 	{

@@ -17,6 +17,7 @@ There is no Windows build yet.
 - **Tutorial** on the menu is a short practice game for one player against one computer house, on this screen or on your own device, with a lesson card the first time each part of the game comes up.
 - The turn timer can be 15 to 120 seconds a turn (30 unless you change it), or off.
 - **History Mode** is on unless you switch it off. Off, the game leaves out the historical notes on the cards, the Historian's Journal and the real history at the end; the cards, rules and plague dates stay the same.
+- **Settings** on the menu (and in a game's top bar) has the graphics (full screen or window, quality, frame rate limit, V-Sync), the volume of the sound effects and the music, the camera's speed, and the keys, which you can change.
 - The game saves itself after every move. **Continue saved game** on the menu picks it up again.
 
 ### Everyone on their own device
@@ -30,6 +31,8 @@ The 3D game can be the big screen of a game played from phones, tablets or lapto
 Everyone watches the map on the big screen and takes their turn on their own device. Any device can press Next on a card. A device that reloads or drops out goes back to its house by joining the same room again, and a saved game reopens its room when it is continued. This needs an internet connection: messages between the screens pass through the same relay service the web version uses, and nothing is stored there.
 
 ### Controls
+
+These are the keys the game starts with. All but the arrows, Enter and Esc can be changed under **Settings**, **Controls**.
 
 | Action | Key |
 |---|---|

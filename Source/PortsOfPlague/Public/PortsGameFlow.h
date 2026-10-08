@@ -75,6 +75,11 @@ private:
 	void ShowCredits();
 	void ShowResearch();
 	void ShowLicenses();
+	// PortsFlowSettings.cpp
+	void ShowSettings();
+	TSharedRef<SWidget> SettingsPage(const TSharedRef<struct FPortsSettingsView>& View);
+	bool SettingsKeyCapture();
+	TWeakPtr<struct FPortsSettingsView> SettingsView;
 	void ShowCity(const FString& CityId);
 	TSharedRef<SWidget> BuildGameScreen();
 	void Refresh();

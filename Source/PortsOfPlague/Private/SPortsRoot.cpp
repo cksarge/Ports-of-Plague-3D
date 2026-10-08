@@ -160,6 +160,39 @@ int32 SPortsMapLabels::OnPaint(const FPaintArgs& Args, const FGeometry& Allotted
 
 // ---------- Root ----------
 
+// Holds a card's scrolling page while the card is dealt. Until Settle() the page is not trimmed to its own
+// edge; with TrimBelow it is trimmed along its lower edge only, with room above and at the sides.
+class SPortsDealRoom : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SPortsDealRoom) : _TrimBelow(false) {}
+		SLATE_ARGUMENT(bool, TrimBelow)
+		SLATE_DEFAULT_SLOT(FArguments, Content)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& Args)
+	{
+		bTrimBelow = Args._TrimBelow;
+		ChildSlot[ Args._Content.Widget ];
+	}
+
+	void Settle() { bTrimBelow = false; }
+
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& G, const FSlateRect& Culling, FSlateWindowElementList& Out, int32 Layer, const FWidgetStyle& Style, bool bEnabled) const override
+	{
+		if (!bTrimBelow) return SCompoundWidget::OnPaint(Args, G, Culling, Out, Layer, Style, bEnabled);
+		constexpr float Room = 120.f;
+		const FVector2f Size = G.GetLocalSize();
+		Out.PushClip(FSlateClippingZone(G.MakeChild(Size + FVector2f(2 * Room, Room), FSlateLayoutTransform(FVector2f(-Room, -Room)))));
+		const int32 Top = SCompoundWidget::OnPaint(Args, G, Culling, Out, Layer, Style, bEnabled);
+		Out.PopClip();
+		return Top;
+	}
+
+private:
+	bool bTrimBelow = false;
+};
+
 void SPortsRoot::Construct(const FArguments& Args)
 {
 	SetVisibility(EVisibility::SelfHitTestInvisible);
@@ -227,27 +260,34 @@ void SPortsRoot::OpenDialog(TFunction<TSharedRef<SWidget>(FPortsClose)> Build, c
 	const TSharedRef<SScrollBar> Bar = SNew(SScrollBar);
 	const TSharedRef<SWidget> Built = Build(Close);
 	Watch(Built, Options.bStory ? TEXT("story card") : Options.bSide ? TEXT("side prompt") : Options.bWide ? TEXT("wide card") : TEXT("card"));
-	// While a card is being dealt it may lift and turn a little outside the page; the page only trims its
-	// contents to its edge (as it must, to scroll) once the card has settled.
-	// That is only allowed when the whole card fits on the page. A card too long for the page has to scroll, and
-	// left untrimmed its text would run out past the page's lower border until the trimming began.
+	// While a card is being dealt it lifts, grows and turns a little outside the page, so for that moment the
+	// page does not trim its contents to its own edge (as it must afterwards, to scroll). A card that fits is
+	// not trimmed at all meanwhile. A card too long for the page is trimmed only along the page's lower
+	// edge, where its text would otherwise run out past the border; above and at the sides it is free.
 	Built->SlatePrepass(FMath::Max(0.1f, GetCachedGeometry().Scale));
 	const float Room = ViewHeight() * 0.9f - 64.f;
 	const float Tall = Built->GetDesiredSize().Y;
 	const float Zoom = Options.bFit && Tall > Room && Tall > 1.f ? FMath::Clamp(Room / Tall, 0.45f, 1.f) : 1.f;
 	const bool bFits = Tall * Zoom < Room + 0.5f;
-	const bool bLoose = Options.bStory && bFits;
+	float DealSeconds = 1.f;
+	{
+		// For checking the game: -PortsSlowDeal=6 (see SPortsEntrance) keeps the page loose for as long as the slowed deal lasts.
+		float Slow = 1.f;
+		if (FParse::Value(FCommandLine::Get(), TEXT("PortsSlowDeal="), Slow)) DealSeconds *= FMath::Max(1.f, Slow);
+	}
 	const TSharedRef<SWidget> Sized = Zoom < 1.f
 		? StaticCastSharedRef<SWidget>(SNew(SPortsZoom).Zoom(Zoom)[ Built ])
 		: Built;
-	const TSharedRef<SScrollBox> Scroll = SNew(SScrollBox).ExternalScrollbar(Bar).Clipping(bLoose ? EWidgetClipping::Inherit : EWidgetClipping::ClipToBounds)
+	const TSharedRef<SScrollBox> Scroll = SNew(SScrollBox).ExternalScrollbar(Bar).Clipping(EWidgetClipping::Inherit)
 		+ SScrollBox::Slot().Padding(FMargin(0, 0, 14, 0))[ Sized ];
-	if (bLoose)
+	const TSharedRef<SPortsDealRoom> Dealing = SNew(SPortsDealRoom).TrimBelow(!bFits)[ Scroll ];
 	{
 		TWeakPtr<SScrollBox> WeakScroll = Scroll;
-		RegisterActiveTimer(1.0f, FWidgetActiveTimerDelegate::CreateLambda([WeakScroll](double, float)
+		TWeakPtr<SPortsDealRoom> WeakDealing = Dealing;
+		RegisterActiveTimer(DealSeconds, FWidgetActiveTimerDelegate::CreateLambda([WeakScroll, WeakDealing](double, float)
 		{
 			if (const TSharedPtr<SScrollBox> Box = WeakScroll.Pin()) Box->SetClipping(EWidgetClipping::ClipToBounds);
+			if (const TSharedPtr<SPortsDealRoom> Room = WeakDealing.Pin()) Room->Settle();
 			return EActiveTimerReturnType::Stop;
 		}));
 	}
@@ -256,7 +296,7 @@ void SPortsRoot::OpenDialog(TFunction<TSharedRef<SWidget>(FPortsClose)> Build, c
 		.MaxDesiredHeight(TAttribute<FOptionalSize>::CreateLambda([Weak]() { const TSharedPtr<SPortsRoot> Root = Weak.Pin(); return FOptionalSize((Root.IsValid() ? Root->ViewHeight() : 720.f) * 0.9f); }))
 		[
 			PortsUi::Entrance(PortsUi::Frame(SNew(SOverlay)
-				+ SOverlay::Slot()[ Scroll ]
+				+ SOverlay::Slot()[ Dealing ]
 				+ SOverlay::Slot().HAlign(HAlign_Right)[ Bar ]), 0)
 		];
 

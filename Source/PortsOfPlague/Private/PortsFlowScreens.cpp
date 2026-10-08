@@ -333,9 +333,11 @@ void UPortsGameFlow::ShowMenu(bool bArrive)
 	Buttons.Add(PortsUi::Button(TEXT("New game"), [this]() { SetupForm.Reset(); ShowSetup(); }, bSaved ? EButton::Normal : EButton::Primary), FMargin(0, 6));
 	// Not on the website: a practice game with lesson cards.
 	Buttons.Add(PortsUi::Button(TEXT("Tutorial"), [this]() { ShowTutorialChoice(); }), FMargin(0, 6));
-	Buttons.Add(PortsUi::Button(TEXT("Rules  <key>R</>"), [this]() { ShowRules(); }), FMargin(0, 6));
+	Buttons.Add(PortsUi::Button(TEXT("Rules  <key>{k:rules}</>"), [this]() { ShowRules(); }), FMargin(0, 6));
 	Buttons.Add(PortsUi::Button(TEXT("Historical Research Sheet"), [this]() { ShowResearch(); }), FMargin(0, 6));
 	Buttons.Add(PortsUi::Button(TEXT("About & credits"), [this]() { ShowCredits(); }), FMargin(0, 6));
+	// Not on the website: graphics, audio and controls (the sound and music switches are in there).
+	Buttons.Add(PortsUi::Button(TEXT("Settings"), [this]() { ShowSettings(); }), FMargin(0, 6));
 	// Not on the website, which is closed with its browser tab: the way out of a full-screen game.
 	Buttons.Add(PortsUi::Button(TEXT("Quit"), [this]()
 	{
@@ -344,14 +346,6 @@ void UPortsGameFlow::ShowMenu(bool bArrive)
 		if (Room.IsValid()) { Room->Close(); Room.Reset(); }
 		FPlatformMisc::RequestExit(false);
 	}, EButton::Ghost), FMargin(0, 6));
-	Buttons.AddBuilt([this](float)
-	{
-		return SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1)[ SNew(SSpacer) ]
-			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 5, 0)[ PortsUi::Button(bSoundOn ? TEXT("Sound on") : TEXT("Sound off"), [this]() { SetSoundOn(!bSoundOn); ShowMenu(); }, EButton::Small) ]
-			+ SHorizontalBox::Slot().AutoWidth().Padding(5, 0, 0, 0)[ PortsUi::Button(bMusicOn ? TEXT("Music on") : TEXT("Music off"), [this]() { SetMusicOn(!bMusicOn); ShowMenu(); }, EButton::Small) ]
-			+ SHorizontalBox::Slot().FillWidth(1)[ SNew(SSpacer) ];
-	}, FMargin(0, 6));
 	Doc.Add(SNew(SBox).HAlign(HAlign_Center)[ Wide(Buttons.Build(380), 380) ]);
 	// .menu-foot: who can play, and for how long (the website's line; this version is played with a mouse or keyboard).
 	if (FPortsData::Get().IsLoaded())
@@ -1138,7 +1132,7 @@ TSharedRef<SWidget> UPortsGameFlow::BuildGameScreen()
 	const TSharedRef<SWidget> MapButtons = SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left).Padding(0, 0, 0, 5)[ MapButton(TEXT("<b>+</>"), [](APortsCameraPawn& Pawn) { Pawn.ZoomBy(1.5); }) ]
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left).Padding(0, 0, 0, 5)[ MapButton(TEXT("<b>−</>"), [](APortsCameraPawn& Pawn) { Pawn.ZoomBy(1 / 1.5); }) ]
-		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left)[ MapButton(TEXT("Reset map  <key>H</>"), [](APortsCameraPawn& Pawn) { Pawn.ShowWholeMap(); }) ];
+		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left)[ MapButton(TEXT("Reset map  <key>{k:map}</>"), [](APortsCameraPawn& Pawn) { Pawn.ShowWholeMap(); }) ];
 	Root->MarkSolid(MapButtons);
 
 	// .legend in game.css and map.js: bottom left of the map, folded until its heading is clicked.
@@ -1307,10 +1301,11 @@ TSharedRef<SWidget> UPortsGameFlow::BuildTopBar()
 		];
 	}
 	Bar->AddSlot().FillWidth(1)[ SNew(SSpacer) ];
-	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(TEXT("Rules <key>R</>"), [this]() { ShowRules(); }, EButton::Small) ];
-	if (Ui.history) Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(TEXT("Journal <key>J</>"), [this]() { ShowJournal(); }, EButton::Small) ];
-	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(bSoundOn ? TEXT("Sound on <key>M</>") : TEXT("Sound off <key>M</>"), [this]() { SetSoundOn(!bSoundOn); Notify(bSoundOn ? TEXT("Sound effects on") : TEXT("Sound effects off"), 1.2f); RefreshTopBar(); }, EButton::Small) ];
-	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(bMusicOn ? TEXT("Music on <key>N</>") : TEXT("Music off <key>N</>"), [this]() { SetMusicOn(!bMusicOn); Notify(bMusicOn ? TEXT("Music on") : TEXT("Music off"), 1.2f); RefreshTopBar(); }, EButton::Small) ];
+	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(TEXT("Rules <key>{k:rules}</>"), [this]() { ShowRules(); }, EButton::Small) ];
+	if (Ui.history) Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(TEXT("Journal <key>{k:journal}</>"), [this]() { ShowJournal(); }, EButton::Small) ];
+	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(bSoundOn ? TEXT("Sound on <key>{k:sound}</>") : TEXT("Sound off <key>{k:sound}</>"), [this]() { SetSoundOn(!bSoundOn); Notify(bSoundOn ? TEXT("Sound effects on") : TEXT("Sound effects off"), 1.2f); RefreshTopBar(); }, EButton::Small) ];
+	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(bMusicOn ? TEXT("Music on <key>{k:music}</>") : TEXT("Music off <key>{k:music}</>"), [this]() { SetMusicOn(!bMusicOn); Notify(bMusicOn ? TEXT("Music on") : TEXT("Music off"), 1.2f); RefreshTopBar(); }, EButton::Small) ];
+	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(TEXT("Settings"), [this]() { ShowSettings(); }, EButton::Small) ];
 	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(TEXT("Save & menu"), [this]() { LeaveGame(); }, EButton::SmallGhostLight) ];
 	FPortsBoxLook Look;
 	Look.Top = Color(TEXT("#8f1a12")); Look.Mid = Color(TEXT("#5c0d09")); Look.MidAt = 0.7f; Look.Bottom = Color(TEXT("#470a07"));

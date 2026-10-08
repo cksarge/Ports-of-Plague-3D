@@ -21,6 +21,7 @@
 #include "PortsData.h"
 #include "PortsFinale.h"
 #include "PortsMapActor.h"
+#include "PortsSettings.h"
 #include "SPortsRoot.h"
 #include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -75,7 +76,7 @@ void UPortsGameFlow::Sound(const TCHAR* Name, double AfterSeconds)
 {
 	if (!bSoundOn || bAutoPlay) return;
 	if (AfterSeconds > 0) { LaterSounds.Add({ Now() + AfterSeconds, FName(Name) }); return; }
-	if (const TObjectPtr<USoundBase>* Found = SoundAssets.Find(FName(*(FString(TEXT("sfx_")) + Name)))) UGameplayStatics::PlaySound2D(Map, *Found, 0.9f);
+	if (const TObjectPtr<USoundBase>* Found = SoundAssets.Find(FName(*(FString(TEXT("sfx_")) + Name)))) UGameplayStatics::PlaySound2D(Map, *Found, 0.9f * FPortsSettings::Get().SoundVolume);
 }
 
 // tradeMood and gameSong in music.js.
@@ -143,7 +144,7 @@ void UPortsGameFlow::TickAudio(float DeltaSeconds)
 			// A song that was stopped earlier picks up where it left off.
 			if (Player->bIsPaused) Player->SetPaused(false);
 			if (!Player->IsPlaying()) Player->Play();
-			Player->SetVolumeMultiplier(FMath::Max(0.001f, Level * SongVolume));
+			Player->SetVolumeMultiplier(FMath::Max(0.001f, Level * SongVolume * FPortsSettings::Get().MusicVolume));
 			Sounding++;
 		}
 		else if (Player && !Player->bIsPaused)

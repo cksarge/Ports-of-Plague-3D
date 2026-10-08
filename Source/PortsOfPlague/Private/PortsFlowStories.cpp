@@ -165,10 +165,10 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 			How.Bullets({
 				FString::Printf(TEXT("<b>Each round</>, the plague reaches new cities (the dates are real), and Chronicle and Event cards are read aloud.%s"),
 					State.turnSeconds ? *FString::Printf(TEXT(" Each turn has a <b>%d-second timer</> (it stops while cards are shown)."), State.turnSeconds) : TEXT("")),
-				FString::Printf(TEXT("<b>On your turn</> you have %d action points. Most actions take 1; opening a trading post or moving family takes %d. Press <key>1</> Ship Goods to earn florins; sea routes pay more, but cargo from a Stricken city may be infected."),
+				FString::Printf(TEXT("<b>On your turn</> you have %d action points. Most actions take 1; opening a trading post or moving family takes %d. Press <key>{k:ship}</> Ship Goods to earn florins; sea routes pay more, but cargo from a Stricken city may be infected."),
 					Cfg(*(Ports::ModePath(State) + TEXT(".actionPoints"))), Cfg(TEXT("actionPointCosts.post"))),
 				FString::Printf(TEXT("<b>Fortune cards:</> roll a %d when shipping, or open a new trading post, and you draw a personal Fortune card."), Cfg(TEXT("fortune.drawOnProfitDie"))),
-				TEXT("<b>Protect your family:</> family in a Stricken city rolls for survival at the end of the round. Move them away (<key>3</>) or prepare your household (<key>4</>)."),
+				TEXT("<b>Protect your family:</> family in a Stricken city rolls for survival at the end of the round. Move them away (<key>{k:move}</>) or prepare your household (<key>{k:prepare}</>)."),
 				TEXT("<b>Win</> with the highest Legacy in 1353: Wealth + Family + Reputation, plus your weakest one again. Balance beats greed."),
 			}, true);
 			Doc.Boxed(PortsUi::PlainLook(PortsUi::Color(TEXT("#eef3fb")), 12, PortsUi::Color(TEXT("#1d4a86")), 2), How, FMargin(14, 8), FMargin(0, 14, 0, 2));

@@ -3,6 +3,7 @@
 #include "PortsGameFlow.h"
 
 #include "PortsMapActor.h"
+#include "PortsSettings.h"
 #include "PortsUi.h"
 #include "SPortsRoot.h"
 #include "Widgets/Layout/SBorder.h"
@@ -228,7 +229,7 @@ void UPortsGameFlow::AddActionsPanel(FPortsDoc& Doc, const FPortsPlayer& P)
 		const FString Why = QuickBlock(Id, P);
 		const FString Name = FString::Printf(TEXT("<caps>%s</>"), *Esc(A.Get(TEXT("name")).AsString()));
 		const FString What = Esc(Why.IsEmpty() ? A.Get(TEXT("short")).AsString() : Why);
-		const FString Key = A.Get(TEXT("key")).AsString().ToUpper();
+		const FString Key = FPortsSettings::Get().KeyLabel(FName(*Id)).ToUpper();
 		const FString Price = CostText(Id);
 		Panel.AddBuilt([this, Look, Hover, Id, Name, What, Key, Price, bOn = Why.IsEmpty()](float W)
 		{
@@ -268,7 +269,7 @@ void UPortsGameFlow::AddActionsPanel(FPortsDoc& Doc, const FPortsPlayer& P)
 	Panel.Add(Rich(TEXT("Merchant's Ledger"), TEXT("Ports.Label"), ETextJustify::Left, false), FMargin(0, 0, 0, 2));
 	for (const V& A : Data().Actions().GetItems()) if (A.Get(TEXT("group")).AsString() == TEXT("ledger")) ActionButton(A);
 	Panel.Space(6);
-	Panel.Add(PortsUi::Button(TEXT("End turn  <lkey>E</>"), [this]() { TryEndTurn(); }, EButton::Primary));
+	Panel.Add(PortsUi::Button(TEXT("End turn  <lkey>{k:end}</>"), [this]() { TryEndTurn(); }, EButton::Primary));
 	Doc.Panel(TEXT("Actions"), PortsUi::Color(TEXT("#1d4a86")), Panel);
 }
 
@@ -280,19 +281,19 @@ FString UPortsGameFlow::HintFor(const FPortsPlayer& P) const
 	if (P.pending.Num()) return TEXT("A card needs your decision first.");
 	FString Danger;
 	for (const FString& L : FamilyLocations(P)) if (L != ESTATE && (IsStricken(State, L) || IsThreatened(State, L))) { Danger = L; break; }
-	if (P.ap == 0) return TEXT("You are out of action points. Press <key>E</> to end your turn and pass the device.");
+	if (P.ap == 0) return TEXT("You are out of action points. Press <key>{k:end}</> to end your turn and pass the device.");
 	if (!Danger.IsEmpty() && IsStricken(State, Danger))
 	{
 		const bool bCanMove = P.ap >= ApCost(TEXT("move")) || P.free.Get(TEXT("move"), false) || P.free.Get(TEXT("moveNoPenalty"), false);
-		const FString MoveText = bCanMove ? FString::Printf(TEXT("<key>3</> Move Family (%d AP; fleeing costs %d reputation) or "), ApCost(TEXT("move")), Cfg(TEXT("penalties.fleeReputation"))) : FString();
-		return FString::Printf(TEXT("Your family in %s is in a Stricken city. They will roll for survival at the end of the round. Consider %s<key>4</> Prepare Household."), *Esc(CityName(Danger)), *MoveText);
+		const FString MoveText = bCanMove ? FString::Printf(TEXT("<key>{k:move}</> Move Family (%d AP; fleeing costs %d reputation) or "), ApCost(TEXT("move")), Cfg(TEXT("penalties.fleeReputation"))) : FString();
+		return FString::Printf(TEXT("Your family in %s is in a Stricken city. They will roll for survival at the end of the round. Consider %s<key>{k:prepare}</> Prepare Household."), *Esc(CityName(Danger)), *MoveText);
 	}
 	if (!Danger.IsEmpty()) return FString::Printf(TEXT("%s is next to a Stricken city (amber ring). The plague may arrive soon."), *Esc(CityName(Danger)));
-	if (P.shipped.Num() == 0) return FString::Printf(TEXT("Start with <key>1</> Ship Goods: pick a route from one of your trading posts. Sea routes pay more. Roll a %d on the profit die and you draw a Fortune card!"), Cfg(TEXT("fortune.drawOnProfitDie")));
+	if (P.shipped.Num() == 0) return FString::Printf(TEXT("Start with <key>{k:ship}</> Ship Goods: pick a route from one of your trading posts. Sea routes pay more. Roll a %d on the profit die and you draw a Fortune card!"), Cfg(TEXT("fortune.drawOnProfitDie")));
 	const int32 PostCost = Cost(State, TEXT("openPost"), &P);
-	if (P.posts.Num() < 2 && P.florins >= PostCost && P.ap >= ApCost(TEXT("post"))) return FString::Printf(TEXT("A second trading post (<key>2</>, %dƒ and %d AP) lets you ship from two places, and opening it draws a Fortune card."), PostCost, ApCost(TEXT("post")));
+	if (P.posts.Num() < 2 && P.florins >= PostCost && P.ap >= ApCost(TEXT("post"))) return FString::Printf(TEXT("A second trading post (<key>{k:post}</>, %dƒ and %d AP) lets you ship from two places, and opening it draws a Fortune card."), PostCost, ApCost(TEXT("post")));
 	const FString* After = P.posts.FindByPredicate([&](const FString& C) { return IsAftermath(State, C); });
-	if (After && P.land.Num() == 0 && FamilyTotal(P) < Cfg(TEXT("start.family"))) return FString::Printf(TEXT("%s is in Aftermath: you can now <key>7</> Arrange a Marriage or <key>8</> Buy Abandoned Land there."), *Esc(CityName(*After)));
+	if (After && P.land.Num() == 0 && FamilyTotal(P) < Cfg(TEXT("start.family"))) return FString::Printf(TEXT("%s is in Aftermath: you can now <key>{k:marry}</> Arrange a Marriage or <key>{k:land}</> Buy Abandoned Land there."), *Esc(CityName(*After)));
 	if (!Ui.history) return TEXT("Tip: your weakest Legacy category counts twice, so keep all three healthy.");
 	return TEXT("Tip: click any city on the map to read its history. Your weakest Legacy category counts twice, so keep all three healthy.");
 }

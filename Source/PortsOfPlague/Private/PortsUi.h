@@ -141,7 +141,8 @@ namespace PortsUi
 	// UnifrakturMaguntia (the blackletter title).
 	FSlateFontInfo Black(float Pixels);
 
-	enum class EButton : uint8 { Normal, Primary, Ghost, Gold, Small, SmallOn, SmallGhostLight };
+	// SmallOn: the chosen one of a row of choices, blue as on the website; SmallRed: the same in the game's red (the Settings card).
+	enum class EButton : uint8 { Normal, Primary, Ghost, Gold, Small, SmallOn, SmallRed, SmallGhostLight };
 
 	TSharedRef<SWidget> Rich(const FString& Markup, const TCHAR* TextStyle = TEXT("Ports.Body"), ETextJustify::Type Justify = ETextJustify::Left, bool bWrap = true, float WrapAt = 0.f);
 	TSharedRef<SWidget> Button(const FString& Markup, TFunction<void()> OnClick, EButton Kind = EButton::Normal, bool bEnabled = true, const FString& Tip = FString(), float WrapAt = 0.f);

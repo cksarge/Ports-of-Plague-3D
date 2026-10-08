@@ -1,4 +1,5 @@
 #include "PortsUi.h"
+#include "PortsSettings.h"
 
 #include "PortsData.h"
 #include "PortsState.h"
@@ -458,6 +459,9 @@ public:
 	{
 		Kind = Args._Kind;
 		Duration = Kind == 1 ? 0.7f : Kind == 2 ? 0.85f : 0.28f;
+		// For checking the game: -PortsSlowDeal=6 makes every entrance six times slower, so a picture can catch it half way.
+		float Slow = 1.f;
+		if (FParse::Value(FCommandLine::Get(), TEXT("PortsSlowDeal="), Slow)) Duration *= FMath::Max(1.f, Slow);
 		Start = FSlateApplication::Get().GetCurrentTime() + Args._Delay;
 		Back = MakeShared<FSlateRoundedBoxBrush>(PortsUi::Color(TEXT("#6a120c")), 14.f, PortsUi::Color(TEXT("#d9a82b")), 3.f);
 		Inner = MakeShared<FSlateRoundedBoxBrush>(FLinearColor::Transparent, 9.f, PortsUi::Color(TEXT("#f3d27a")), 2.f);
@@ -757,9 +761,17 @@ namespace PortsUi
 
 	TSharedRef<SWidget> Rich(const FString& Markup, const TCHAR* TextStyle, ETextJustify::Type Justify, bool bWrap, float WrapAt)
 	{
+		// "{k:ship}" in any text is the key that does that now (the player can change keys in Settings).
+		FString Filled = Markup;
+		for (int32 At = Filled.Find(TEXT("{k:"), ESearchCase::CaseSensitive); At != INDEX_NONE; At = Filled.Find(TEXT("{k:"), ESearchCase::CaseSensitive, ESearchDir::FromStart, At + 1))
+		{
+			const int32 End = Filled.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromStart, At);
+			if (End == INDEX_NONE) break;
+			Filled = Filled.Left(At) + Esc(FPortsSettings::Get().KeyLabel(FName(*Filled.Mid(At + 3, End - At - 3)))) + Filled.Mid(End + 1);
+		}
 		// With a known width the text wraps at once; otherwise it wraps to whatever room it is given, a frame later.
 		return SNew(SRichTextBlock)
-			.Text(FText::FromString(Markup))
+			.Text(FText::FromString(Filled))
 			.TextStyle(&Style().GetWidgetStyle<FTextBlockStyle>(TextStyle))
 			.DecoratorStyleSet(&Style())
 			.AutoWrapText(bWrap && WrapAt <= 0.f)
@@ -791,7 +803,7 @@ namespace PortsUi
 	// The website's buttons (.btn and its variants in game.css).
 	TSharedRef<SWidget> Button(const FString& Markup, TFunction<void()> OnClick, EButton Kind, bool bEnabled, const FString&, float WrapAt)
 	{
-		const bool bSmall = Kind == EButton::Small || Kind == EButton::SmallOn || Kind == EButton::SmallGhostLight;
+		const bool bSmall = Kind == EButton::Small || Kind == EButton::SmallOn || Kind == EButton::SmallRed || Kind == EButton::SmallGhostLight;
 		FPortsBoxLook L;
 		L.Radius = 12;
 		L.BorderWidth = 2;
@@ -813,6 +825,10 @@ namespace PortsUi
 		case EButton::SmallGhostLight:
 			L.Top = L.Bottom = Hex(TEXT("#fff8e2"), 0.12f); L.Border = Hex(TEXT("#f3d27a"), 0.6f); L.ShadowDrop = 0;
 			TextStyle = TEXT("Ports.BtnSmallGold");
+			break;
+		case EButton::SmallRed:
+			L.Top = Hex(TEXT("#c93a2c")); L.Bottom = Hex(TEXT("#8a1a10")); L.Border = L.Shadow = Hex(TEXT("#4f0c07"));
+			TextStyle = TEXT("Ports.BtnSmallLight");
 			break;
 		case EButton::SmallOn:
 			L.Top = Hex(TEXT("#2a5d9e")); L.Bottom = Hex(TEXT("#16396a")); L.Border = L.Shadow = Hex(TEXT("#0c2344"));

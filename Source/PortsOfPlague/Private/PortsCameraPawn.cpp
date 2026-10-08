@@ -8,6 +8,7 @@
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "PortsSettings.h"
 
 namespace
 {
@@ -201,20 +202,24 @@ void APortsCameraPawn::ReadInput(float DeltaSeconds)
 	if (!PC || bLocked) return;
 
 	FVector2D Move(0, 0);
-	if (PC->IsInputKeyDown(EKeys::Right) || PC->IsInputKeyDown(EKeys::D)) Move.X += 1;
-	if (PC->IsInputKeyDown(EKeys::Left) || PC->IsInputKeyDown(EKeys::A)) Move.X -= 1;
-	if (PC->IsInputKeyDown(EKeys::Down) || PC->IsInputKeyDown(EKeys::S)) Move.Y += 1;
-	if (PC->IsInputKeyDown(EKeys::Up) || PC->IsInputKeyDown(EKeys::W)) Move.Y -= 1;
-	if (!Move.IsZero()) { TargetFocus += Move.GetSafeNormal() * (520.0 / TargetZoom) * DeltaSeconds; bUserView = true; GlideRate = 10.0; }
+	// The arrows always move the map; the other keys are the player's own (Settings, Controls).
+	const FPortsSettings& Keys = FPortsSettings::Get();
+	if (PC->IsInputKeyDown(EKeys::Right) || PC->IsInputKeyDown(Keys.Key(TEXT("right")))) Move.X += 1;
+	if (PC->IsInputKeyDown(EKeys::Left) || PC->IsInputKeyDown(Keys.Key(TEXT("left")))) Move.X -= 1;
+	if (PC->IsInputKeyDown(EKeys::Down) || PC->IsInputKeyDown(Keys.Key(TEXT("down")))) Move.Y += 1;
+	if (PC->IsInputKeyDown(EKeys::Up) || PC->IsInputKeyDown(Keys.Key(TEXT("up")))) Move.Y -= 1;
+	if (!Move.IsZero()) { TargetFocus += Move.GetSafeNormal() * (520.0 * FPortsSettings::Get().MoveFactor() / TargetZoom) * DeltaSeconds; bUserView = true; GlideRate = 10.0; }
 
 	double Factor = 1.0;
+	// The player's zoom speed setting stretches or shrinks each step.
+	const double WheelStep = FMath::Pow(ZoomStep, FPortsSettings::Get().ZoomFactor()), KeyStep = FMath::Pow(1.5, FPortsSettings::Get().ZoomFactor());
 	const APortsGameMode* GameForWheel = GetWorld()->GetAuthGameMode<APortsGameMode>();
 	const bool bOverUi = GameForWheel && GameForWheel->GetFlow() && GameForWheel->GetFlow()->IsPointerOverUi();
 	if (bOverUi) { /* the wheel belongs to the panel under the pointer */ }
-	else if (PC->WasInputKeyJustPressed(EKeys::MouseScrollUp)) Factor *= ZoomStep;
-	if (!bOverUi && PC->WasInputKeyJustPressed(EKeys::MouseScrollDown)) Factor /= ZoomStep;
-	if (PC->WasInputKeyJustPressed(EKeys::Equals) || PC->WasInputKeyJustPressed(EKeys::Add)) Factor *= 1.5;
-	if (PC->WasInputKeyJustPressed(EKeys::Hyphen) || PC->WasInputKeyJustPressed(EKeys::Subtract)) Factor /= 1.5;
+	else if (PC->WasInputKeyJustPressed(EKeys::MouseScrollUp)) Factor *= WheelStep;
+	if (!bOverUi && PC->WasInputKeyJustPressed(EKeys::MouseScrollDown)) Factor /= WheelStep;
+	if (PC->WasInputKeyJustPressed(Keys.Key(TEXT("zoomIn"))) || PC->WasInputKeyJustPressed(EKeys::Add)) Factor *= KeyStep;
+	if (PC->WasInputKeyJustPressed(Keys.Key(TEXT("zoomOut"))) || PC->WasInputKeyJustPressed(EKeys::Subtract)) Factor /= KeyStep;
 	if (Factor != 1.0)
 	{
 		const double NewZoom = FMath::Clamp(TargetZoom * Factor, 1.0, MaxZoom);
@@ -225,7 +230,7 @@ void APortsCameraPawn::ReadInput(float DeltaSeconds)
 		bUserView = true;
 		GlideRate = 10.0;
 	}
-	if (PC->WasInputKeyJustPressed(EKeys::Home) || PC->WasInputKeyJustPressed(EKeys::H)) ShowWholeMap();
+	if (PC->WasInputKeyJustPressed(EKeys::Home) || PC->WasInputKeyJustPressed(Keys.Key(TEXT("map")))) ShowWholeMap();
 
 	// Tipping the camera: hold the right button (two fingers on a trackpad) and move up or down, or use Page Up and Page Down.
 	if (PC->IsInputKeyDown(EKeys::RightMouseButton))
@@ -233,11 +238,11 @@ void APortsCameraPawn::ReadInput(float DeltaSeconds)
 		float DeltaX = 0, DeltaY = 0;
 		PC->GetInputMouseDelta(DeltaX, DeltaY);
 		if (!bTilting) bTilting = !bOverUi;
-		else { TargetTilt += DeltaY * 0.6; bUserView = true; GlideRate = 10.0; }
+		else { TargetTilt += DeltaY * (FPortsSettings::Get().bInvertTilt ? -0.6 : 0.6); bUserView = true; GlideRate = 10.0; }
 	}
 	else bTilting = false;
-	if (PC->IsInputKeyDown(EKeys::PageUp)) TargetTilt += 40.0 * DeltaSeconds;
-	if (PC->IsInputKeyDown(EKeys::PageDown)) TargetTilt -= 40.0 * DeltaSeconds;
+	if (PC->IsInputKeyDown(Keys.Key(TEXT("tiltUp")))) TargetTilt += 40.0 * DeltaSeconds;
+	if (PC->IsInputKeyDown(Keys.Key(TEXT("tiltDown")))) TargetTilt -= 40.0 * DeltaSeconds;
 	TargetTilt = FMath::Clamp(TargetTilt, 22.0 - PitchFor(TargetZoom), 89.0 - PitchFor(TargetZoom));
 
 	const APortsGameMode* Game = GetWorld()->GetAuthGameMode<APortsGameMode>();

@@ -2,7 +2,7 @@
 # Makes the disk image people download: it opens to a window with the game and the Applications folder side by
 # side, and the game is installed by dragging one onto the other.
 #   Tools/make_dmg.sh            after Tools/package_mac.sh; writes Saved/Package/Ports-of-Plague.dmg
-#   Tools/make_dmg.sh 1.3        the same, named Ports-of-Plague-1.3.dmg
+#   Tools/make_dmg.sh 1.3.1        the same, named Ports-of-Plague-1.3.1.dmg
 # The first run fetches the two small Python tools it uses (dmgbuild, to lay the window out without opening
 # Finder, and Pillow, to draw its background) into Saved/DmgTools.
 set -e
