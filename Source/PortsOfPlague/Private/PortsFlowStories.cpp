@@ -140,6 +140,7 @@ void UPortsGameFlow::BuildStory(const FString& Kind, const V& D, FPortsDoc& Doc,
 	Opts.bBig = Remote();
 	Opts.bFit = Remote();
 
+	if (Kind == TEXT("lesson")) { BuildLesson(D.Get(TEXT("id")).AsString(), Doc, Button); return; }
 	if (Kind == TEXT("prologue"))
 	{
 		const V& E = D.Get(TEXT("e"));
@@ -528,7 +529,7 @@ void UPortsGameFlow::OpenStoryPage(const FString& Kind, const V& Data)
 	Doc->Width(Opts.InnerWidth());
 	// A bot's cards go on by themselves after a few seconds (anyone can press the button sooner).
 	const FPortsPlayer* P = Ports::CurrentPlayer(State);
-	const bool bBotCard = P && P->bot && Opts.AutoClose <= 0.f;
+	const bool bBotCard = P && P->bot && Opts.AutoClose <= 0.f && Kind != TEXT("lesson");
 	if (bBotCard) Opts.AutoClose = Cfg(TEXT("bots.cardSeconds"));
 	const FString Label = bBotCard ? FString::Printf(TEXT("%s <lsmall>(or wait %d seconds)</>"), *PortsUi::Esc(Button), Cfg(TEXT("bots.cardSeconds"))) : PortsUi::Esc(Button);
 	if (Remote())
@@ -537,7 +538,7 @@ void UPortsGameFlow::OpenStoryPage(const FString& Kind, const V& Data)
 		const V& CardOf = Data.Get(TEXT("e")).IsObject() ? Data.Get(TEXT("e")) : Data.Get(TEXT("group")).IsArray() && Data.Get(TEXT("group")).Num() ? Data.Get(TEXT("group"))[0] : Data;
 		const FString CardId = Kind == TEXT("reveal") ? Data.Get(TEXT("cardId")).AsString() : CardOf.Get(TEXT("card")).AsString();
 		const int32 PageNo = Data.Get(TEXT("page")).AsInt(), PageCount = Data.Get(TEXT("pages")).AsInt();
-		StoryTitle = Kind == TEXT("prologue") ? (Data.Get(TEXT("part")).AsString() == TEXT("how") ? TEXT("How to play") : TEXT("Prologue"))
+		StoryTitle = Kind == TEXT("lesson") ? LessonTitle(Data.Get(TEXT("id")).AsString()) : Kind == TEXT("prologue") ? (Data.Get(TEXT("part")).AsString() == TEXT("how") ? TEXT("How to play") : TEXT("Prologue"))
 			: Kind == TEXT("order") ? TEXT("Turn order")
 			: Kind == TEXT("round") ? Ports::RoundInfo(State).label + (PageCount > 1 ? FString::Printf(TEXT(" (%d of %d)"), PageNo, PageCount) : FString())
 			: Kind == TEXT("card") || Kind == TEXT("reveal") ? Ports::CardById(CardId).Get(TEXT("title")).AsString()
@@ -547,8 +548,9 @@ void UPortsGameFlow::OpenStoryPage(const FString& Kind, const V& Data)
 			: Kind == TEXT("ship") ? TEXT("Shipment result") : Kind == TEXT("spread") ? TEXT("Plague spreads") : Kind == TEXT("physician") ? TEXT("Physician") : Kind == TEXT("wage") ? TEXT("Wage inspection") : TEXT("Continue");
 		StoryId = ++StorySeq;
 		StoryLabel = Button;
-		StoryKind = Kind;
-		StoryData = Data;
+		// A tutorial lesson is not a card the web version knows: its device shows the title and the button only.
+		StoryKind = Kind == TEXT("lesson") ? FString() : Kind;
+		StoryData = Kind == TEXT("lesson") ? V::Null() : Data;
 		PushToDevices();
 	}
 	Open([Doc, Label](TFunction<void(const FString&)> Close)
@@ -600,8 +602,9 @@ TArray<V> UPortsGameFlow::StoryPages(const FString& Kind, const V& Data) const
 	TFunction<TArray<V>(const FParts&)> Make;
 	const auto Numbered = [](TArray<V> Pages) { for (int32 i = 0; i < Pages.Num(); i++) { Pages[i].Set(TEXT("page"), i + 1); Pages[i].Set(TEXT("pages"), Pages.Num()); } return Pages; };
 	// Each historical fact is a piece of its own, named once.
-	const auto AddFacts = [&Units](const TArray<FString>& FactIds)
+	const auto AddFacts = [&Units, this](const TArray<FString>& FactIds)
 	{
+		if (!Ui.history) return;
 		TArray<FString> Seen;
 		for (const FString& Id : FactIds)
 		{

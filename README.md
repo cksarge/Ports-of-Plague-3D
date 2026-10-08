@@ -2,9 +2,9 @@
 
 *The 3D version of [Ports of Plague](https://github.com/cksarge/Ports-of-Plague), an educational board game about the Black Death, 1347–1353, for 1–6 players, on one screen or each on their own device. Made in Unreal Engine 5.8.*
 
-It is the same game as the web version: the same rules, numbers, cards and historical facts, read from the same data files. What is new is the board. The map of Europe is a 3D model with hills, mountains, forests and moving water. Walled towns change as the plague arrives and passes, flags mark each house's trading posts, ships and carts travel the routes, the dice are real cubes, and the game ends with a finale staged on the map.
+It is the same game as the web version: the same rules, numbers, cards and historical facts, read from the same data files. What is new is the board, and a few things the web version does not have: a tutorial, a choice of turn timer length, History Mode, and the research sheet inside the game. The map of Europe is a 3D model with hills, mountains, forests and moving water. Walled towns change as the plague arrives and passes, flags mark each house's trading posts, ships and carts travel the routes, the dice are real cubes, and the game ends with a finale staged on the map.
 
-Play the web version at https://portsofplague.carterscoding.com/. Its repository has the rule book, the research sheet and the sources.
+New features are now made here, in the 3D version. The web version at https://portsofplague.carterscoding.com/ is where players' own devices join a game. The rule book, the research sheet and the research notes are in [Documents](Documents), and the research sheet can also be read in the game.
 
 ## Play
 
@@ -14,6 +14,9 @@ There is no Windows build yet.
 
 - Choose 2–6 houses, their names and home cities, the game length and the difficulty. Any house can be played by a bot.
 - With more than one person, the screen says when to pass the computer on.
+- **Tutorial** on the menu is a short practice game for one player against one computer house, on this screen or on your own device, with a lesson card the first time each part of the game comes up.
+- The turn timer can be 15 to 120 seconds a turn (30 unless you change it), or off.
+- **History Mode** is on unless you switch it off. Off, the game leaves out the historical notes on the cards, the Historian's Journal and the real history at the end; the cards, rules and plague dates stay the same.
 - The game saves itself after every move. **Continue saved game** on the menu picks it up again.
 
 ### Everyone on their own device
@@ -61,6 +64,7 @@ Close the Unreal editor before running any of these.
 | `Tools/package_mac.sh` | makes `Saved/Package/Mac/PortsOfPlague.app` |
 | `Tools/make_dmg.sh` | makes the disk image people download, `Saved/Package/Ports-of-Plague.dmg`, from that app |
 | `Tools/sync_data.sh` | copies the web version's data files into `Content/Data` (`--check` only compares) |
+| `python3 Tools/make_research.py` | makes `Content/Data/research.json`, the game's Historical Research Sheet and Licenses screens, from the web version's finished sheet and licence files in `Documents/` |
 | `Tools/build_content.sh` | makes the materials and imports the textures, music and sounds |
 
 Or open `PortsOfPlague.uproject` in the editor and press Play.
@@ -72,6 +76,7 @@ The engine is expected at `/Users/Shared/Epic Games/UE_5.8`. Set `UE_ROOT` if yo
 - **`Source/PortsEngine`** is the rules: a C++ port of the web version's engine with no graphics in it. Its tests replay 240 games recorded from the web engine and compare the whole game state after every move, so the two versions stay the same game.
 - **`Source/PortsOfPlague`** is everything you see and hear: the map, the camera, the screens, the finale and the sound. It also holds the big screen's side of multi-device play (`PortsNet`), a port of the web version's room and message code that speaks to the same relay service, so the web version's join page works with it unchanged.
 - **`Content/Data`** holds unchanged copies of the web version's data files. The rules, the card text and every historical fact come from there and nowhere else.
+- **`Documents`** holds copies of the web version's research notes, printable PDFs (rule book, research sheet, presentation outline), finished document pages and reports, and licence texts, so they stay with this project.
 - **`Tools`** holds the scripts above, and the ones that draw the game's pictures and record its sound effects from the web version's own code.
 
 Nearly everything is made by code rather than in the editor: the level is empty, and the map, towns, ships and screens are built when the game starts.

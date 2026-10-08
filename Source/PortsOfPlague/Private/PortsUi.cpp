@@ -746,6 +746,10 @@ namespace PortsUi
 		return *StyleSet;
 	}
 
+	static bool bHistoryNotes = true;
+	void SetHistoryShown(bool bShown) { bHistoryNotes = bShown; }
+	bool HistoryShown() { return bHistoryNotes; }
+
 	FString Esc(const FString& Text)
 	{
 		return Text.Replace(TEXT("&"), TEXT("&amp;")).Replace(TEXT("<"), TEXT("&lt;")).Replace(TEXT(">"), TEXT("&gt;")).Replace(TEXT("\""), TEXT("&quot;"));
@@ -1165,6 +1169,7 @@ FPortsDoc& FPortsDoc::Fact(const FString& FactId)
 // .note in game.css: pale, with a red bar down the left.
 FPortsDoc& FPortsDoc::Note(const TArray<FString>& FactIds, const FString& Title)
 {
+	if (!PortsUi::HistoryShown()) return *this;
 	const FPortsData& Data = FPortsData::Get();
 	TArray<FString> Known;
 	for (const FString& Id : FactIds)

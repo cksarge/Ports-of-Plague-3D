@@ -214,6 +214,8 @@ struct FPortsSetup
 	bool prePlague = false;
 	// true = each turn has a time limit (config.turnTimer.seconds).
 	bool timer = false;
+	// The time limit in seconds when the players chose their own; 0 = config.turnTimer.seconds.
+	int32 timerSeconds = 0;
 };
 
 struct FPortsPlayerStyle { const TCHAR* color; const TCHAR* colorName; const TCHAR* crest; };

@@ -164,7 +164,7 @@ void UPortsGameFlow::Save()
 	const V Out = V::Object({
 		{ TEXT("savedAt"), static_cast<double>(FDateTime::UtcNow().ToUnixTimestamp()) * 1000.0 },
 		{ TEXT("state"), State.ToValue() },
-		{ TEXT("ui"), V::Object({ { TEXT("hints"), Ui.hints }, { TEXT("seenSeq"), Ui.seenSeq }, { TEXT("lastNote"), V::Strings(Ui.lastNote) },
+		{ TEXT("ui"), V::Object({ { TEXT("hints"), Ui.hints }, { TEXT("history"), Ui.history }, { TEXT("tutorial"), Ui.tutorial }, { TEXT("lessons"), V::Strings(Ui.lessons) }, { TEXT("seenSeq"), Ui.seenSeq }, { TEXT("lastNote"), V::Strings(Ui.lastNote) },
 			{ TEXT("room"), Room.IsValid() ? V::Object({ { TEXT("code"), V(Room->Code) }, { TEXT("seats"), Room->SavedSeatsValue() } }) : V::Null() } }) },
 	});
 	FFileHelper::SaveStringToFile(Out.ToJson(), *SavePath(), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
@@ -180,6 +180,10 @@ bool UPortsGameFlow::LoadSaved(FPortsState& OutState, FPortsUiState& OutUi) cons
 	if (!FPortsState::FromValue(In.Get(TEXT("state")), OutState)) return false;
 	const V& U = In.Get(TEXT("ui"));
 	OutUi.hints = U.Get(TEXT("hints")).Truthy();
+	// Games saved before History Mode existed have it on.
+	OutUi.history = !U.Has(TEXT("history")) || U.Get(TEXT("history")).Truthy();
+	OutUi.tutorial = U.Get(TEXT("tutorial")).Truthy();
+	OutUi.lessons = U.Get(TEXT("lessons")).ToStrings();
 	OutUi.seenSeq = U.Get(TEXT("seenSeq")).AsInt();
 	OutUi.lastNote = U.Get(TEXT("lastNote")).ToStrings();
 	OutUi.roomCode = U.Get(TEXT("room")).Get(TEXT("code")).AsString();
@@ -211,10 +215,11 @@ V UPortsGameFlow::DeviceView() const
 {
 	// The story card waiting for Next (if any), whether the big screen is busy, and the turn clock.
 	const V Next = StoryId ? V::Object({ { TEXT("id"), StoryId }, { TEXT("label"), V(StoryLabel) }, { TEXT("title"), V(StoryTitle) }, { TEXT("kind"), V(StoryKind) }, { TEXT("data"), StoryData } }) : V::Null();
+	// (A tutorial lesson has no kind and no data: a device shows its title and the button, and the card is read on this screen.)
 	const bool bActing = (Map && Map->IsAnimating()) || Steps.Num() > 0 || HoldUntil > 0;
 	const bool bHold = Root.IsValid() && (Root->HasStoryDialog() || bActing);
 	const V Timer = bClockOn ? V::Object({ { TEXT("left"), FMath::RoundToDouble(FMath::Max(0.0, ClockLeft) * 10.0) / 10.0 }, { TEXT("running"), !bHold } }) : V::Null();
-	return V::Object({ { TEXT("next"), Next }, { TEXT("busy"), bActing }, { TEXT("hints"), Ui.hints }, { TEXT("note"), V::Strings(Ui.lastNote) }, { TEXT("timer"), Timer } });
+	return V::Object({ { TEXT("next"), Next }, { TEXT("busy"), bActing }, { TEXT("hints"), Ui.hints }, { TEXT("note"), V::Strings(Ui.lastNote) }, { TEXT("timer"), Timer }, { TEXT("history"), Ui.history } });
 }
 
 void UPortsGameFlow::PushToDevices()
@@ -263,7 +268,7 @@ void UPortsGameFlow::MarkSeen(int32 Seq)
 
 void UPortsGameFlow::SetNote(const V& FactIds)
 {
-	if (FactIds.Num() == 0) return;
+	if (FactIds.Num() == 0 || !Ui.history) return;
 	Ui.lastNote.Reset();
 	for (const FString& Id : FactIds.ToStrings())
 	{
@@ -292,7 +297,9 @@ void UPortsGameFlow::Pump()
 			Step();
 			continue;
 		}
+		if (TutorialBefore()) continue;
 		if (PresentNew()) continue;
+		if (State.phase == TEXT("ended") && Lesson(TEXT("final"))) continue;
 		// The game is over: the finale plays, then the results (straight to the results when the game is only checking itself).
 		if (State.phase == TEXT("ended") && Room.IsValid()) { PushAt = 0; Room->PushState(State.ToValue(), DeviceView()); }
 		if (State.phase == TEXT("ended")) { if (bAutoPlay && TestFinale < 0) ShowEnd(); else ShowFinale(); return; }
@@ -336,6 +343,7 @@ void UPortsGameFlow::Pump()
 			FinishTurn();
 			return;
 		}
+		if (TutorialTurn(*P)) continue;
 		// A card waiting for an answer: asked here, or answered on the player's own device.
 		if (P->pending.Num() && !Remote()) { OpenDecisionPrompt(); return; }
 		return;
@@ -732,7 +740,7 @@ void UPortsGameFlow::HandleKeys()
 	if (Root->HasDialog()) return;
 	if (PC->WasInputKeyJustPressed(EKeys::R)) { ShowRules(); return; }
 	if (!bInGame) return;
-	if (PC->WasInputKeyJustPressed(EKeys::J)) { ShowJournal(); return; }
+	if (PC->WasInputKeyJustPressed(EKeys::J) && Ui.history) { ShowJournal(); return; }
 	if (PC->WasInputKeyJustPressed(EKeys::M)) { SetSoundOn(!bSoundOn); Notify(bSoundOn ? TEXT("Sound effects on") : TEXT("Sound effects off"), 1.2f); RefreshTopBar(); return; }
 	if (PC->WasInputKeyJustPressed(EKeys::N)) { SetMusicOn(!bMusicOn); Notify(bMusicOn ? TEXT("Music on") : TEXT("Music off"), 1.2f); RefreshTopBar(); return; }
 	const FPortsPlayer* P = Ports::CurrentPlayer(State);
@@ -794,6 +802,12 @@ void UPortsGameFlow::Tick(float DeltaSeconds)
 	}
 	TestScriptTick();
 	if (LobbyRoom.IsValid()) { LobbyRoom->Tick(FPlatformTime::Seconds()); TestLobbyPlay(); }
+	// The tutorial's room: the first device to join is the player, and the game begins.
+	if (bTutorialLobby && LobbyRoom.IsValid() && LobbyRoom->bReady)
+	{
+		const FPortsSeat* Seat = LobbyRoom->Seats.FindByPredicate([](const FPortsSeat& S) { return !S.bot; });
+		if (Seat) { const FPortsSeat Joined = *Seat; BeginTutorial(&Joined); }
+	}
 	if (Room.IsValid())
 	{
 		Room->Tick(FPlatformTime::Seconds());

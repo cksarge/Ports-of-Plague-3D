@@ -104,7 +104,8 @@ void UPortsGameFlow::ShowFinale()
 		M.Infected, M.Infected == 1 ? TEXT("") : TEXT("s"), EarlyNames.Num() ? *FString::Join(EarlyNames, TEXT(", ")) : TEXT("no city"));
 	M.StandLine = FString::Printf(TEXT("%s In 1349, the people who tried were overruled; the accusations were false and the violence unjust."),
 		Stood.Num() ? *FString::Printf(TEXT("%s took a stand to protect a persecuted community."), *FString::Join(Stood, TEXT(", "))) : TEXT("No house took a stand to protect the persecuted community."));
-	M.MetaLine = FString::Printf(TEXT("%s · %s played · %s discovered"), *Plural(State.players.Num(), TEXT("house")), *Plural(Rounds, TEXT("round")), *Plural(State.journal.Num(), TEXT("fact"))).ToUpper();
+	M.MetaLine = (Ui.history ? FString::Printf(TEXT("%s · %s played · %s discovered"), *Plural(State.players.Num(), TEXT("house")), *Plural(Rounds, TEXT("round")), *Plural(State.journal.Num(), TEXT("fact")))
+		: FString::Printf(TEXT("%s · %s played"), *Plural(State.players.Num(), TEXT("house")), *Plural(Rounds, TEXT("round")))).ToUpper();
 
 	// The Toll: the lost fall one by one, taking turns between the houses.
 	{

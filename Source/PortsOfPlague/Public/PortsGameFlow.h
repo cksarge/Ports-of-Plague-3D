@@ -20,6 +20,11 @@ struct FPortsDialogOptions;
 struct FPortsUiState
 {
 	bool hints = false;
+	// History Mode (not on the website): false = the historical notes, the Journal and the real history at the end are left out.
+	bool history = true;
+	// The tutorial (not on the website): a practice game with lesson cards, and the lessons already given.
+	bool tutorial = false;
+	TArray<FString> lessons;
 	// The last log entry already shown to the players.
 	int32 seenSeq = 0;
 	// The facts of the latest historical note.
@@ -60,7 +65,7 @@ private:
 	void ShowStart(const TSharedPtr<SWidget>& Over = nullptr);
 	void LeaveStart();
 	void ShowSetup();
-	void BeginGame(const FPortsSetup& Setup, bool bHints);
+	void BeginGame(const FPortsSetup& Setup, bool bHints, bool bHistory = true);
 	void ContinueSaved();
 	void EnterGame();
 	void LeaveGame();
@@ -68,6 +73,8 @@ private:
 	void ShowRules();
 	void ShowJournal();
 	void ShowCredits();
+	void ShowResearch();
+	void ShowLicenses();
 	void ShowCity(const FString& CityId);
 	TSharedRef<SWidget> BuildGameScreen();
 	void Refresh();
@@ -111,6 +118,19 @@ private:
 	void OpenStoryPage(const FString& Kind, const FPortsValue& Data);
 	TArray<FPortsValue> StoryPages(const FString& Kind, const FPortsValue& Data) const;
 	float StoryZoom(const FString& Kind, const FPortsValue& Page) const;
+
+	// ---------- The tutorial (PortsFlowTutorial.cpp; its screens are in PortsFlowScreens.cpp) ----------
+	void ShowTutorialChoice();
+	void ShowTutorialLobby();
+	// OwnDevice: the seat that joined the tutorial's room, or null to play on this screen.
+	void BeginTutorial(const struct FPortsSeat* OwnDevice);
+	bool Lesson(const FString& Id);
+	bool TutorialBefore();
+	bool TutorialTurn(const FPortsPlayer& P);
+	void BuildLesson(const FString& Id, FPortsDoc& Doc, FString& Button) const;
+	FString LessonTitle(const FString& Id) const;
+	bool bTutorialLobby = false;
+	FString TutorialLobbyError;
 
 	// ---------- Choices (PortsFlowPrompts.cpp) ----------
 	void OpenActionPrompt(const FString& Id);

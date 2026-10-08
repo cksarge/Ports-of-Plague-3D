@@ -495,6 +495,11 @@ PORTS_TEST(FPortsTestTimer, "turn timer time up declines open cards and passes t
 	CHECK("the turn passed on", !CurrentPlayer(S) || CurrentPlayer(S)->id != Id);
 	CHECK("time up is in the log", S.log.ContainsByPredicate([Id](const V& E) { return E.Get(TEXT("type")).AsString() == TEXT("timeUp") && E.Get(TEXT("player")).AsInt() == Id; }));
 	CHECK("timer off by default in the engine", Game(Four(9)).turnSeconds == 0);
+	// A length the players chose replaces the usual one; without the timer it means nothing.
+	Setup.timerSeconds = 45;
+	CHECK("chosen timer seconds", Game(Setup).turnSeconds == 45);
+	Setup.timer = false;
+	CHECK("no timer, no seconds", Game(Setup).turnSeconds == 0);
 	return true;
 }
 

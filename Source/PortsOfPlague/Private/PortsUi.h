@@ -129,6 +129,9 @@ namespace PortsUi
 	FLinearColor Color(const TCHAR* HexCode);
 	// Makes plain text safe to put inside markup.
 	FString Esc(const FString& Text);
+	// History Mode: while off, FPortsDoc::Note adds nothing, so no card shows a Historical Note.
+	void SetHistoryShown(bool bShown);
+	bool HistoryShown();
 
 	// The website's typefaces, at the stylesheet's pixel sizes.
 	// EB Garamond (body text): Face is Regular, Italic or Bold.

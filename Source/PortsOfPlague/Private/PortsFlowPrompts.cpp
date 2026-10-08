@@ -293,6 +293,7 @@ FString UPortsGameFlow::HintFor(const FPortsPlayer& P) const
 	if (P.posts.Num() < 2 && P.florins >= PostCost && P.ap >= ApCost(TEXT("post"))) return FString::Printf(TEXT("A second trading post (<key>2</>, %dƒ and %d AP) lets you ship from two places, and opening it draws a Fortune card."), PostCost, ApCost(TEXT("post")));
 	const FString* After = P.posts.FindByPredicate([&](const FString& C) { return IsAftermath(State, C); });
 	if (After && P.land.Num() == 0 && FamilyTotal(P) < Cfg(TEXT("start.family"))) return FString::Printf(TEXT("%s is in Aftermath: you can now <key>7</> Arrange a Marriage or <key>8</> Buy Abandoned Land there."), *Esc(CityName(*After)));
+	if (!Ui.history) return TEXT("Tip: your weakest Legacy category counts twice, so keep all three healthy.");
 	return TEXT("Tip: click any city on the map to read its history. Your weakest Legacy category counts twice, so keep all three healthy.");
 }
 

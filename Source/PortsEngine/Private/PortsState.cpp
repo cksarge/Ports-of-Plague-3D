@@ -145,7 +145,7 @@ namespace Ports
 		State.span = (Modes.Get(Mode).IsObject() ? Modes.Get(Mode) : Modes.Get(TEXT("standard"))).Get(TEXT("span")).AsInt();
 		State.firstHalf = Start;
 		State.preRounds = PreRounds;
-		State.turnSeconds = Setup.timer ? Data.Int(TEXT("turnTimer.seconds")) : 0;
+		State.turnSeconds = !Setup.timer ? 0 : Setup.timerSeconds > 0 ? Setup.timerSeconds : Data.Int(TEXT("turnTimer.seconds"));
 		State.round = Start - 1;
 		State.roundEnd = Start - 1;
 		State.phase = TEXT("roundStart");

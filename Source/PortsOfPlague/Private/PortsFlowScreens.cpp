@@ -37,6 +37,9 @@ struct FPortsSetupForm
 	bool hints = true;
 	bool prePlague = true;
 	bool timer = true;
+	bool history = true;
+	// Seconds per turn; 0 = the rule book's own length (config.turnTimer.seconds).
+	int32 timerSeconds = 0;
 	TArray<FPortsSetupPlayer> players;
 	FString error;
 	// Everyone on their own device: this screen opens a room and becomes the big screen.
@@ -117,6 +120,24 @@ namespace
 		return Out;
 	}
 
+	// Content/Data/research.json (made by Tools/make_research.py), read the first time it is asked for.
+	const FPortsValue& ResearchFile()
+	{
+		static FPortsValue File;
+		static bool bRead = false;
+		if (!bRead)
+		{
+			bRead = true;
+			FString Json;
+			const FString Path = FPaths::Combine(FPortsData::DefaultDataDir(), TEXT("research.json"));
+			if (!FFileHelper::LoadFileToString(Json, *Path) || !FPortsValue::Parse(Json, File)) UE_LOG(LogTemp, Error, TEXT("Ports of Plague: could not read %s"), *Path);
+		}
+		return File;
+	}
+
+	// Whether the rules show their fact codes: not in a game played without History Mode.
+	bool bRuleFactCodes = true;
+
 	// Rule text: fills {{config.path}} and {{fact:ID}}, then **bold** and *italic* (render/template.js).
 	FString RuleText(const FString& Text)
 	{
@@ -128,7 +149,10 @@ namespace
 			if (Open == INDEX_NONE || Close == INDEX_NONE) { Filled += Text.Mid(i); break; }
 			Filled += Text.Mid(i, Open - i);
 			const FString Key = Text.Mid(Open + 2, Close - Open - 2).TrimStartAndEnd();
-			Filled += Key.StartsWith(TEXT("fact:")) ? FString::Printf(TEXT("\x01%s\x02"), *Key.Mid(5)) : ConfigText(Key);
+			if (!Key.StartsWith(TEXT("fact:"))) Filled += ConfigText(Key);
+			else if (bRuleFactCodes) Filled += FString::Printf(TEXT("\x01%s\x02"), *Key.Mid(5));
+			// Without History Mode a fact code goes, with the space before it.
+			else Filled.TrimEndInline();
 			i = Close + 2;
 		}
 		FString Out = Esc(Filled);
@@ -280,6 +304,8 @@ void UPortsGameFlow::ShowMenu(bool bArrive)
 	StartContent.Reset();
 	if (APortsCameraPawn* Pawn = Camera()) Pawn->SetLocked(false);
 	bInGame = false;
+	bTutorialLobby = false;
+	PortsUi::SetHistoryShown(true);
 	bResults = false;
 	bPlagueCard = false;
 	CloseLobbyRoom();
@@ -305,7 +331,10 @@ void UPortsGameFlow::ShowMenu(bool bArrive)
 		Buttons.Add(PortsUi::Button(FString::Printf(TEXT("Continue saved game\n<btnsmalllight>%s · %s</>"), Info.bValid ? *Esc(Info.label) : TEXT("Start"), *FString::Join(Names, TEXT(", "))), [this]() { ContinueSaved(); }, EButton::Primary, true, FString(), 380 - 48), FMargin(0, 6));
 	}
 	Buttons.Add(PortsUi::Button(TEXT("New game"), [this]() { SetupForm.Reset(); ShowSetup(); }, bSaved ? EButton::Normal : EButton::Primary), FMargin(0, 6));
+	// Not on the website: a practice game with lesson cards.
+	Buttons.Add(PortsUi::Button(TEXT("Tutorial"), [this]() { ShowTutorialChoice(); }), FMargin(0, 6));
 	Buttons.Add(PortsUi::Button(TEXT("Rules  <key>R</>"), [this]() { ShowRules(); }), FMargin(0, 6));
+	Buttons.Add(PortsUi::Button(TEXT("Historical Research Sheet"), [this]() { ShowResearch(); }), FMargin(0, 6));
 	Buttons.Add(PortsUi::Button(TEXT("About & credits"), [this]() { ShowCredits(); }), FMargin(0, 6));
 	// Not on the website, which is closed with its browser tab: the way out of a full-screen game.
 	Buttons.Add(PortsUi::Button(TEXT("Quit"), [this]()
@@ -340,6 +369,124 @@ void UPortsGameFlow::ShowMenu(bool bArrive)
 	Root->SetScreen(SNew(SOverlay)
 		+ SOverlay::Slot()[ SNew(SBackgroundBlur).BlurStrength_Lambda([Weak]() { return Weak.IsValid() ? Weak->StartBlur() : 0.f; }).bApplyAlphaToBlur(false).Visibility(EVisibility::HitTestInvisible) ]
 		+ SOverlay::Slot()[ Menu ]);
+}
+
+// ---------- The tutorial's way in ----------
+
+// Where the one player of the tutorial will sit: at this screen, or on a device of their own.
+void UPortsGameFlow::ShowTutorialChoice()
+{
+	if (!FPortsData::EnsureLoaded()) return;
+	FPortsDialogOptions Opts;
+	Opts.EnterValue = TEXT("here");
+	Open([](TFunction<void(const FString&)> Close)
+	{
+		FPortsDoc Doc;
+		Doc.H2(TEXT("Tutorial"));
+		Doc.P(FString::Printf(TEXT("A short practice game for one player against one computer house: Quick Play on Apprentice difficulty, about %d minutes. Lesson cards explain each part of the game the first time it comes up."), FPortsData::Get().Int(TEXT("timeEstimates.quick.2"))));
+		Doc.P(TEXT("Where will you play?"));
+		Doc.Buttons({
+			PortsUi::Button(TEXT("Cancel"), [Close]() { Close(TEXT("close")); }, EButton::Ghost),
+			PortsUi::Button(TEXT("On my own device"), [Close]() { Close(TEXT("device")); }),
+			PortsUi::Button(TEXT("On this screen  <lsmall>Enter</>"), [Close]() { Close(TEXT("here")); }, EButton::Primary),
+		});
+		return Doc.Build(FPortsDialogOptions().InnerWidth());
+	}, Opts, [this](const FString& Value)
+	{
+		if (Value == TEXT("here")) BeginTutorial(nullptr);
+		else if (Value == TEXT("device")) { TutorialLobbyError.Reset(); bTutorialLobby = true; ShowTutorialLobby(); }
+	});
+}
+
+// Waiting for the player's own device: a room with one seat. The tutorial begins as soon as a device has joined.
+void UPortsGameFlow::ShowTutorialLobby()
+{
+	if (!bTutorialLobby) return;
+	TWeakObjectPtr<UPortsGameFlow> Weak(this);
+	if (!LobbyRoom.IsValid() && TutorialLobbyError.IsEmpty())
+	{
+		if (!FPortsTransport::IsAvailable()) TutorialLobbyError = TEXT("Multi-device play is not set up on this copy of the game yet.");
+		else
+		{
+			LobbyRoom = MakeShared<FPortsRoom>();
+			LobbyRoom->Options = V::Object({ { TEXT("mode"), TEXT("quick") }, { TEXT("difficulty"), TEXT("apprentice") }, { TEXT("prePlague"), true }, { TEXT("timer"), false }, { TEXT("history"), true }, { TEXT("timerSeconds"), V::Null() } });
+			LobbyRoom->OnChange = [Weak]() { if (Weak.IsValid()) Weak->ShowTutorialLobby(); };
+			FString AskFor;
+			FParse::Value(FCommandLine::Get(), TEXT("PortsRoomCode="), AskFor);
+			LobbyRoom->Open(AskFor, TArray<FPortsSeat>(), false, [Weak](bool bOk)
+			{
+				if (!Weak.IsValid() || !Weak->bTutorialLobby) return;
+				if (!bOk) { Weak->TutorialLobbyError = TEXT("Could not open a room. Check the internet connection and try again."); Weak->LobbyRoom.Reset(); }
+				Weak->ShowTutorialLobby();
+			});
+		}
+	}
+	FPortsDoc Doc;
+	Doc.H1(TEXT("Tutorial"));
+	if (!TutorialLobbyError.IsEmpty()) Doc.P(FString::Printf(TEXT("<risk>%s</>"), *Esc(TutorialLobbyError)));
+	else if (!LobbyRoom.IsValid() || !LobbyRoom->bReady) Doc.P(TEXT("Opening a room…"));
+	else
+	{
+		FPortsBoxLook CodeBox;
+		CodeBox.Top = Color(TEXT("#8f1a12")); CodeBox.Bottom = Color(TEXT("#5c0d09"));
+		CodeBox.Radius = 12;
+		CodeBox.Border = Color(TEXT("#d9a82b")); CodeBox.BorderWidth = 3;
+		Doc.Add(PortsUi::Box(CodeBox, SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)[ Rich(FString::Printf(TEXT("<roomat>Join at </><roomaddr>%s</><roomat> → </><roomem>Join a game</>"), *Esc(FPortsTransport::JoinAddress())), TEXT("Ports.Body"), ETextJustify::Left, false) ]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[ Rich(FString::Printf(TEXT("<roomcode>%s</>"), *Esc(LobbyRoom->Code)), TEXT("Ports.Body"), ETextJustify::Right, false) ], FMargin(18, 10)), FMargin(0, 6));
+		Doc.P(TEXT("Open the game on your own device, choose <i>Join a game</> and type the code. Pick a house name and a home city there; the tutorial begins as soon as you have joined."));
+		Doc.Small(TEXT("This screen stays the big screen: it shows the map, the dice, every card and the lessons. You take your turns on your device."));
+	}
+	Doc.Space(8);
+	TArray<TSharedRef<SWidget>> Row;
+	Row.Add(PortsUi::Button(TEXT("← Back"), [this]() { ShowMenu(); }, EButton::Ghost));
+	if (!TutorialLobbyError.IsEmpty() && FPortsTransport::IsAvailable()) Row.Add(PortsUi::Button(TEXT("Try again"), [this]() { TutorialLobbyError.Reset(); ShowTutorialLobby(); }));
+	Row.Add(PortsUi::Button(TEXT("Play on this screen instead"), [this]() { CloseLobbyRoom(); BeginTutorial(nullptr); }));
+	Doc.Row(Row, 8);
+	Root->SetScreen(Page(Doc.Build(1100 - 58), 1100, TEXT("bg_title_veil"), false, Root, true));
+}
+
+// The tutorial's game is always the same one: Quick Play on Apprentice with the pre-plague round, no timer,
+// hints on, the learner against one easy computer house, from the same seed.
+void UPortsGameFlow::BeginTutorial(const FPortsSeat* OwnDevice)
+{
+	if (!FPortsData::EnsureLoaded()) return;
+	bTutorialLobby = false;
+	FPortsSetup Setup;
+	FPortsSetupPlayer Me, Bot;
+	Me.name = OwnDevice ? OwnDevice->name : FString(TEXT("House of the Anchor"));
+	Me.home = OwnDevice ? OwnDevice->home : FString(TEXT("genoa"));
+	Bot.name = Me.name == TEXT("House of the Lion") ? TEXT("House of the Rose") : TEXT("House of the Lion");
+	Bot.home = Me.home == TEXT("bruges") ? TEXT("venice") : TEXT("bruges");
+	Bot.bot = true;
+	Bot.skill = TEXT("easy");
+	Setup.players = { Me, Bot };
+	for (int32 i = 0; i < Setup.players.Num(); i++)
+	{
+		Setup.players[i].color = Ports::PLAYER_STYLES[i].color; Setup.players[i].colorName = Ports::PLAYER_STYLES[i].colorName; Setup.players[i].crest = Ports::PLAYER_STYLES[i].crest;
+	}
+	Setup.mode = TEXT("quick");
+	Setup.difficulty = TEXT("apprentice");
+	Setup.prePlague = true;
+	Setup.timer = false;
+	Setup.seed = TEXT("tutorial");
+	if (OwnDevice && LobbyRoom.IsValid())
+	{
+		// The lobby's room becomes the game's room, with the computer house in its second seat.
+		LobbyRoom->AddBot(Bot.name, Bot.home, Bot.skill);
+		Room = LobbyRoom;
+		LobbyRoom.Reset();
+		Room->bStarted = true;
+		AdoptRoom();
+	}
+	else CloseLobbyRoom();
+	FString Problem;
+	if (!Ports::CreateGame(Setup, State, Problem)) { Notify(Problem, 5.f); return; }
+	Ui = FPortsUiState();
+	Ui.hints = true;
+	Ui.tutorial = true;
+	Save();
+	EnterGame();
 }
 
 // ---------- New game ----------
@@ -397,13 +544,14 @@ void UPortsGameFlow::TestLobbyPlay()
 	Setup.difficulty = TestLobbySpec.Contains(TEXT("mortality")) ? TEXT("mortality") : TEXT("chronicler");
 	Setup.prePlague = TestLobbySpec.Contains(TEXT("pre"));
 	Setup.timer = bTestLobbyTimer;
+	Setup.timerSeconds = SetupForm->timerSeconds;
 	Setup.seed = TEXT("test-") + TestLobbySpec;
 	Room = LobbyRoom;
 	LobbyRoom.Reset();
 	Room->bStarted = true;
 	AdoptRoom();
 	SetupForm->bDevices = false;
-	BeginGame(Setup, false);
+	BeginGame(Setup, false, SetupForm->history);
 }
 
 void UPortsGameFlow::CloseLobbyRoom()
@@ -456,7 +604,8 @@ void UPortsGameFlow::ShowSetup()
 		// What players waiting in the lobby are told about the game.
 		if (LobbyRoom.IsValid())
 		{
-			const V Options = V::Object({ { TEXT("mode"), V(Form->mode) }, { TEXT("difficulty"), V(Form->difficulty) }, { TEXT("prePlague"), Form->prePlague }, { TEXT("timer"), Form->timer } });
+			const V Options = V::Object({ { TEXT("mode"), V(Form->mode) }, { TEXT("difficulty"), V(Form->difficulty) }, { TEXT("prePlague"), Form->prePlague }, { TEXT("timer"), Form->timer },
+				{ TEXT("history"), Form->history }, { TEXT("timerSeconds"), Form->timer ? V(Form->timerSeconds > 0 ? Form->timerSeconds : Cfg(TEXT("turnTimer.seconds"))) : V::Null() } });
 			if (Options.ToJson() != LobbyRoom->Options.ToJson()) { LobbyRoom->Options = Options; LobbyRoom->PushLobby(); }
 		}
 		if (!Form->roomError.IsEmpty())
@@ -704,8 +853,8 @@ void UPortsGameFlow::ShowSetup()
 		+ SHorizontalBox::Slot().FillWidth(1).Padding(8, 0, 0, 0)[ Difficulty.Widget() ]);
 	Doc.Space(8);
 
-	// The three options, each a tick box in its own pale panel.
-	const float CheckText = (InnerWidth - 20) / 3 - 20 - 33;
+	// The options, each a tick box in its own pale panel.
+	const float CheckText = (InnerWidth - 30) / 4 - 20 - 33;
 	const auto Check = [CheckText](const FString& Title, const FString& Text, bool bOn, TFunction<void()> Toggle) -> TSharedRef<SWidget>
 	{
 		const FPortsBoxLook Panel = PortsUi::PlainLook(FLinearColor(1.f, 0.955f, 0.83f, 0.6f), 10, Color(TEXT("#d8bc7c")), 1);
@@ -729,6 +878,7 @@ void UPortsGameFlow::ShowSetup()
 				]
 			];
 	};
+	const int32 TimerSeconds = Form->timerSeconds > 0 ? Form->timerSeconds : Cfg(TEXT("turnTimer.seconds"));
 	const FString FirstPre = Data().Timeline().Get(TEXT("prePlague"))[0].Get(TEXT("label")).AsString();
 	Doc.Add(SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(1).Padding(0, 0, 5, 0)
@@ -739,13 +889,30 @@ void UPortsGameFlow::ShowSetup()
 		]
 		+ SHorizontalBox::Slot().FillWidth(1).Padding(5, 0)
 		[
-			Check(TEXT("Turn timer"), FString::Printf(TEXT("%d seconds per turn; when time runs out, the next house plays. The clock stops while cards are shown."), Cfg(TEXT("turnTimer.seconds"))),
+			Check(TEXT("Turn timer"), FString::Printf(TEXT("%d seconds per turn; when time runs out, the next house plays. The clock stops while cards are shown."), TimerSeconds),
 				Form->timer, [Form, Redraw]() { Form->timer = !Form->timer; Redraw(); })
+		]
+		+ SHorizontalBox::Slot().FillWidth(1).Padding(5, 0)
+		[
+			Check(TEXT("Guided hints"), TEXT("Tips on screen during the first round."), Form->hints, [Form, Redraw]() { Form->hints = !Form->hints; Redraw(); })
 		]
 		+ SHorizontalBox::Slot().FillWidth(1).Padding(5, 0, 0, 0)
 		[
-			Check(TEXT("Guided hints"), TEXT("Tips on screen during the first round."), Form->hints, [Form, Redraw]() { Form->hints = !Form->hints; Redraw(); })
+			// Not on the website.
+			Check(TEXT("History Mode"), TEXT("Historical notes on the cards, the Historian's Journal and the real history at the end. Switch off to play without them."), Form->history, [Form, Redraw]() { Form->history = !Form->history; Redraw(); })
 		]);
+
+	// Not on the website: how long a turn lasts. The rule book's length is the one chosen to begin with.
+	if (Form->timer)
+	{
+		const TSharedRef<SHorizontalBox> Lengths = SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 10, 0)[ Rich(TEXT("<capsb>Seconds per turn</>"), TEXT("Ports.Body"), ETextJustify::Left, false) ];
+		for (const int32 Seconds : { 15, 20, 30, 45, 60, 90, 120 })
+		{
+			Lengths->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 7, 0)[ Seg(FString::FromInt(Seconds), TimerSeconds == Seconds, [Form, Seconds, Redraw]() { Form->timerSeconds = Seconds; Redraw(); }) ];
+		}
+		Doc.Add(Lengths, FMargin(0, 8, 0, 0));
+	}
 
 	Doc.P(Form->error.IsEmpty() ? FString(TEXT(" ")) : FString::Printf(TEXT("<risk>%s</>"), *Esc(Form->error)));
 	Doc.Add(SNew(SHorizontalBox)
@@ -787,6 +954,7 @@ void UPortsGameFlow::ShowSetup()
 				Setup.mode = Form->mode;
 				Setup.prePlague = Form->prePlague;
 				Setup.timer = Form->timer;
+				Setup.timerSeconds = Form->timerSeconds;
 				Setup.seed = FString::Printf(TEXT("%lld-%f"), FDateTime::UtcNow().ToUnixTimestamp() * 1000 + FDateTime::UtcNow().GetMillisecond(), FMath::FRand());
 				if (Form->bDevices)
 				{
@@ -797,7 +965,7 @@ void UPortsGameFlow::ShowSetup()
 					AdoptRoom();
 					Form->bDevices = false;
 				}
-				BeginGame(Setup, Form->hints || Form->difficulty == TEXT("apprentice"));
+				BeginGame(Setup, Form->hints || Form->difficulty == TEXT("apprentice"), Form->history);
 			}, EButton::Primary)
 		]);
 	// A change on this screen redraws only what is inside the frame, so the page neither jumps nor scrolls back to the top.
@@ -811,12 +979,13 @@ void UPortsGameFlow::ShowSetup()
 	Root->SetScreen(Page(Holder, 1180, TEXT("bg_wood"), true, Root));
 }
 
-void UPortsGameFlow::BeginGame(const FPortsSetup& Setup, bool bHints)
+void UPortsGameFlow::BeginGame(const FPortsSetup& Setup, bool bHints, bool bHistory)
 {
 	FString Problem;
 	if (!Ports::CreateGame(Setup, State, Problem)) { Notify(Problem, 5.f); return; }
 	Ui = FPortsUiState();
 	Ui.hints = bHints;
+	Ui.history = bHistory;
 	Save();
 	EnterGame();
 }
@@ -883,6 +1052,7 @@ void UPortsGameFlow::ReopenRoom()
 void UPortsGameFlow::EnterGame()
 {
 	bInGame = true;
+	PortsUi::SetHistoryShown(Ui.history);
 	HandledTurn = -1;
 	Steps.Reset();
 	bBotWaiting = false;
@@ -1138,7 +1308,7 @@ TSharedRef<SWidget> UPortsGameFlow::BuildTopBar()
 	}
 	Bar->AddSlot().FillWidth(1)[ SNew(SSpacer) ];
 	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(TEXT("Rules <key>R</>"), [this]() { ShowRules(); }, EButton::Small) ];
-	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(TEXT("Journal <key>J</>"), [this]() { ShowJournal(); }, EButton::Small) ];
+	if (Ui.history) Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(TEXT("Journal <key>J</>"), [this]() { ShowJournal(); }, EButton::Small) ];
 	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(bSoundOn ? TEXT("Sound on <key>M</>") : TEXT("Sound off <key>M</>"), [this]() { SetSoundOn(!bSoundOn); Notify(bSoundOn ? TEXT("Sound effects on") : TEXT("Sound effects off"), 1.2f); RefreshTopBar(); }, EButton::Small) ];
 	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(bMusicOn ? TEXT("Music on <key>N</>") : TEXT("Music off <key>N</>"), [this]() { SetMusicOn(!bMusicOn); Notify(bMusicOn ? TEXT("Music on") : TEXT("Music off"), 1.2f); RefreshTopBar(); }, EButton::Small) ];
 	Bar->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(3, 0)[ PortsUi::Button(TEXT("Save & menu"), [this]() { LeaveGame(); }, EButton::SmallGhostLight) ];
@@ -1389,14 +1559,16 @@ void UPortsGameFlow::ShowEnd()
 	FPortsDoc Left, Right;
 	Left.Panel(TEXT("Your game"), Color(TEXT("#7a1410")), Yours, FMargin(0));
 	Right.Panel(TEXT("What Really Happened"), Color(TEXT("#7a1410")), Real, FMargin(0));
-	Doc.Columns({ Left, Right }, 16);
+	// Without History Mode there is no real history to set beside the game, and no Journal.
+	if (Ui.history) Doc.Columns({ Left, Right }, 16);
+	else Doc.Nest(Left);
 	Doc.Space(10);
-	Doc.Buttons({
-		PortsUi::Button(TEXT("\u21BA Watch the finale again"), [this]() { bResults = false; ShowFinale(); }),
-		PortsUi::Button(FString::Printf(TEXT("Historian's Journal (%d facts)"), State.journal.Num()), [this]() { ShowJournal(); }),
-		PortsUi::Button(TEXT("Main menu"), [this]() { ShowMenu(); }),
-		PortsUi::Button(TEXT("Play again"), [this]() { ShowSetup(); }, EButton::Primary),
-	});
+	TArray<TSharedRef<SWidget>> EndButtons;
+	EndButtons.Add(PortsUi::Button(TEXT("\u21BA Watch the finale again"), [this]() { bResults = false; ShowFinale(); }));
+	if (Ui.history) EndButtons.Add(PortsUi::Button(FString::Printf(TEXT("Historian's Journal (%d facts)"), State.journal.Num()), [this]() { ShowJournal(); }));
+	EndButtons.Add(PortsUi::Button(TEXT("Main menu"), [this]() { ShowMenu(); }));
+	EndButtons.Add(PortsUi::Button(TEXT("Play again"), [this]() { ShowSetup(); }, EButton::Primary));
+	Doc.Buttons(EndButtons);
 	Root->SetScreen(Page(Doc.Build(1100 - 58), 1100, TEXT("bg_wood"), true, Root));
 }
 
@@ -1409,7 +1581,9 @@ void UPortsGameFlow::ShowRules()
 	const TSharedRef<FPortsDoc> Doc = MakeShared<FPortsDoc>();
 	Doc->Text(Esc(Book.Get(TEXT("title")).AsString()), TEXT("Ports.TitleSmall"), ETextJustify::Center, FMargin(0));
 	Doc->Text(FString::Printf(TEXT("%s \u2014 Rule Book"), *Esc(Book.Get(TEXT("subtitle")).AsString())), TEXT("Ports.Subtitle"), ETextJustify::Center, FMargin(0, 2, 0, 10));
-	Doc->Small(TEXT("These are the same rules as the printable Rule Book (both are generated from one file). Numbers in brackets like [TR-02] are historical facts; open the Historian's Journal to read them."));
+	bRuleFactCodes = !bInGame || Ui.history;
+	Doc->Small(bRuleFactCodes ? TEXT("These are the same rules as the printable Rule Book. Numbers in brackets like [TR-02] are historical facts; open the Historian's Journal to read them.")
+		: TEXT("These are the same rules as the printable Rule Book."));
 	for (const V& Section : Book.Get(TEXT("sections")).GetItems())
 	{
 		Doc->H2(Esc(Section.Get(TEXT("title")).AsString()));
@@ -1547,15 +1721,16 @@ void UPortsGameFlow::ShowCredits()
 	if (!FPortsData::EnsureLoaded()) return;
 	const TSharedRef<FPortsDoc> Doc = MakeShared<FPortsDoc>();
 	Doc->H2(TEXT("About Ports of Plague"));
-	Doc->P(TEXT("An original educational game about the spread and effects of the Black Death, 1347–1353, made by Carter K, Landon S, Valen H and John-Paul T for a high-school history class."));
+	Doc->P(TEXT("An original educational game about the spread and effects of the Black Death, 1347–1353, made by Carter K."));
 	Doc->H3(TEXT("Credits"));
 	Doc->Bullets({
-		FString::Printf(TEXT("<b>History:</> %d facts from %d sources (see the Historian's Journal and the Research Sheet)."), Data().Facts().Num(), Data().Files[TEXT("sources")].Get(TEXT("sources")).Num()),
+		FString::Printf(TEXT("<b>History:</> %d facts from %d sources (see the Historian's Journal and the Historical Research Sheet)."), Data().Facts().Num(), Data().Files[TEXT("sources")].Get(TEXT("sources")).Num()),
 		TEXT("<b>Map:</> coastlines, rivers and lakes from Natural Earth (public domain)."),
 		TEXT("<b>Fonts:</> EB Garamond, Cinzel and UnifrakturMaguntia, all under the SIL Open Font License."),
 		TEXT("<b>Sound effects:</> original, made by the game's own code; no outside recordings are used."),
 		TEXT("<b>Dice:</> the 3D dice are adapted from roll-a-die (© 2015 ukatama), under the MIT License."),
 		TEXT("<b>Playing on several devices:</> the big screen and the players' phones, tablets or computers talk through Supabase Realtime. Only house names, home cities and game moves are sent; nothing is stored and there are no accounts."),
+		TEXT("<b>Secure connections:</> the list of trusted certificate authorities is Mozilla's, as extracted by the curl project (curl.se/docs/caextract.html), under the Mozilla Public License 2.0."),
 	});
 	Doc->H3(TEXT("Music"));
 	TArray<FString> Tracks;
@@ -1566,15 +1741,128 @@ void UPortsGameFlow::ShowCredits()
 			*Esc(T.Get(TEXT("author")).AsString()), *Esc(T.Get(TEXT("site")).AsString()), *Esc(T.Get(TEXT("license")).AsString())));
 	}
 	Doc->Bullets(Tracks);
+	Doc->Small(TEXT("The full text of every license above can be read here in the game: press Licenses below."));
 	Doc->H3(TEXT("Content note"));
 	Doc->P(TEXT("The game deals with mass death and with the persecution of Jewish communities. It treats these seriously and without graphic detail, and it states plainly that the accusations against Jews were false and the violence unjust."));
-	Doc->H3(TEXT("License"));
-	Doc->P(TEXT("This work is open source and protected under the MIT License. Copyright © 2026 Carter K, Landon S, Valen H, and John-Paul T."));
 	// The notices Epic's licence asks for, word for word, at the very end.
 	Doc->H3(TEXT("Engine"));
 	Doc->P(TEXT("Ports of Plague uses Unreal® Engine. Unreal® is a trademark or registered trademark of Epic Games, Inc. in the United States of America and elsewhere."));
 	Doc->P(TEXT("Unreal® Engine, Copyright 1998 – 2026, Epic Games, Inc. All rights reserved."));
 	FPortsDialogOptions Opts;
+	Opts.EnterValue = TEXT("close");
+	Open([this, Doc, Opts](TFunction<void(const FString&)> Close)
+	{
+		Doc->Buttons({ PortsUi::Button(TEXT("Licenses"), [this]() { ShowLicenses(); }), PortsUi::Button(TEXT("Close"), [Close]() { Close(TEXT("close")); }, EButton::Primary) });
+		return Doc->Build(Opts.InnerWidth());
+	}, Opts, nullptr);
+}
+
+// The Historical Research Sheet, word for word: the web version's finished sheet as Tools/make_research.py read it.
+void UPortsGameFlow::ShowResearch()
+{
+	const V& Sheet = ResearchFile();
+	if (!Sheet.IsObject()) return;
+	const TSharedRef<FPortsDoc> Doc = MakeShared<FPortsDoc>();
+	Doc->Text(Sheet.Get(TEXT("title")).AsString(), TEXT("Ports.TitleSmall"), ETextJustify::Center, FMargin(0));
+	Doc->Text(Sheet.Get(TEXT("subtitle")).AsString(), TEXT("Ports.Subtitle"), ETextJustify::Center, FMargin(0, 2, 0, 10));
+	const TFunction<void(FPortsDoc&, const V&)> AddBlocks = [&AddBlocks](FPortsDoc& To, const V& Blocks)
+	{
+		for (const V& B : Blocks.GetItems())
+		{
+			const FString Type = B.Get(TEXT("type")).AsString();
+			const FString Text = B.Get(TEXT("text")).AsString();
+			if (Type == TEXT("h2")) To.H2(Text);
+			else if (Type == TEXT("p")) To.P(Text);
+			else if (Type == TEXT("small")) To.Small(Text);
+			else if (Type == TEXT("box"))
+			{
+				FPortsDoc Inner;
+				AddBlocks(Inner, B.Get(TEXT("blocks")));
+				To.Boxed(PortsUi::PlainLook(FLinearColor(1.f, 0.955f, 0.83f, 0.6f), 10, PortsUi::Color(TEXT("#d8bc7c")), 1), Inner, FMargin(14, 8));
+			}
+			else if (Type == TEXT("table"))
+			{
+				// The fact table gives most of its width to the fact itself; the small table shares it equally.
+				const bool bFacts = B.Get(TEXT("facts")).Truthy();
+				TArray<FString> Head;
+				for (const V& Cell : B.Get(TEXT("head")).GetItems()) Head.Add(Styled(Cell.AsString(), TEXT("caps")));
+				TArray<float> Shares;
+				for (int32 c = 0; c < Head.Num(); c++) Shares.Add(!bFacts ? 1.f : c == 0 ? 0.5f : c == 1 ? 3.f : c == 2 ? 0.85f : 1.5f);
+				const V Rows = B.Get(TEXT("rows"));
+				To.AddBuilt([Head, Shares, Rows, bFacts](float W)
+				{
+					const TSharedRef<SGridPanel> Grid = SNew(SGridPanel);
+					float Total = 0.f;
+					for (int32 c = 0; c < Shares.Num(); c++) { Grid->SetColumnFill(c, Shares[c]); Total += Shares[c]; }
+					const FLinearColor Line = PortsUi::Color(TEXT("#d8bc7c"));
+					const auto CellWidth = [&](int32 c) { return W > 0.f ? FMath::Max(30.f, W * Shares[c] / Total - 2.f - 16.f - 2.f) : 0.f; };
+					for (int32 c = 0; c < Head.Num(); c++)
+					{
+						Grid->AddSlot(c, 0).Padding(1)[ PortsUi::Box(PortsUi::PlainLook(PortsUi::Color(TEXT("#ecd9aa")), 0, Line, 1), Rich(Head[c], TEXT("Ports.Body"), ETextJustify::Left, true, CellWidth(c)), FMargin(8, 5)) ];
+					}
+					int32 r = 1;
+					for (const V& Row : Rows.GetItems())
+					{
+						if (Row.Get(TEXT("group")).IsString())
+						{
+							Grid->AddSlot(0, r).ColumnSpan(Head.Num()).Padding(1)[ PortsUi::Box(PortsUi::PlainLook(PortsUi::Color(TEXT("#f6ecd2")), 0, Line, 1), Rich(Styled(Row.Get(TEXT("group")).AsString(), TEXT("b")), TEXT("Ports.Body"), ETextJustify::Left, false), FMargin(8, 5)) ];
+						}
+						else
+						{
+							const V Cells = Row.Get(TEXT("cells"));
+							for (int32 c = 0; c < Cells.Num() && c < Head.Num(); c++)
+							{
+								const FString Cell = bFacts && c == 0 ? Styled(Cells[c].AsString(), TEXT("id")) : Cells[c].AsString();
+								Grid->AddSlot(c, r).Padding(1)[ PortsUi::Box(PortsUi::PlainLook(FLinearColor(1, 1, 1, 0.25f), 0, Line, 1), Rich(Cell, TEXT("Ports.Body"), bFacts ? ETextJustify::Left : ETextJustify::Center, true, CellWidth(c)), FMargin(8, 5)) ];
+							}
+						}
+						r++;
+					}
+					return Grid;
+				});
+			}
+		}
+	};
+	AddBlocks(*Doc, Sheet.Get(TEXT("blocks")));
+	FPortsDialogOptions Opts;
+	Opts.bWide = true;
+	Opts.EnterValue = TEXT("close");
+	Open([Doc, Opts](TFunction<void(const FString&)> Close)
+	{
+		Doc->Buttons({ PortsUi::Button(TEXT("Close  <lsmall>Esc</>"), [Close]() { Close(TEXT("close")); }, EButton::Primary) });
+		return Doc->Build(Opts.InnerWidth());
+	}, Opts, nullptr);
+}
+
+// The full text of each license the credits name, so nobody has to look for a file.
+void UPortsGameFlow::ShowLicenses()
+{
+	const V& Sheet = ResearchFile();
+	if (!Sheet.IsObject()) return;
+	const TSharedRef<FPortsDoc> Doc = MakeShared<FPortsDoc>();
+	Doc->H2(TEXT("Licenses"));
+	for (const V& License : Sheet.Get(TEXT("licenses")).GetItems())
+	{
+		Doc->H3(Esc(License.Get(TEXT("title")).AsString()));
+		TArray<FString> Paragraphs;
+		License.Get(TEXT("text")).AsString().Replace(TEXT("\r"), TEXT("")).ParseIntoArray(Paragraphs, TEXT("\n\n"));
+		for (const FString& Paragraph : Paragraphs)
+		{
+			// The files are wrapped by hand; full lines run on, short ones (headings, names, addresses) keep their break.
+			TArray<FString> Lines;
+			Paragraph.TrimStartAndEnd().ParseIntoArrayLines(Lines);
+			FString Text;
+			for (int32 i = 0; i < Lines.Num(); i++) Text += Lines[i].TrimStartAndEnd() + (i + 1 == Lines.Num() ? TEXT("") : Lines[i].Len() < 50 ? TEXT("\n") : TEXT(" "));
+			Doc->Small(Esc(Text));
+		}
+	}
+	Doc->H3(TEXT("Mozilla root certificates"));
+	Doc->Small(TEXT("The list of trusted certificate authorities is used unchanged, under the Mozilla Public License 2.0. Its text is at mozilla.org/MPL/2.0 and the list itself at curl.se/docs/caextract.html."));
+	Doc->H3(TEXT("Unreal Engine"));
+	Doc->Small(TEXT("Ports of Plague uses Unreal® Engine. Unreal® is a trademark or registered trademark of Epic Games, Inc. in the United States of America and elsewhere."));
+	Doc->Small(TEXT("Unreal® Engine, Copyright 1998 – 2026, Epic Games, Inc. All rights reserved."));
+	FPortsDialogOptions Opts;
+	Opts.bWide = true;
 	Opts.EnterValue = TEXT("close");
 	Open([Doc, Opts](TFunction<void(const FString&)> Close)
 	{
@@ -1594,6 +1882,9 @@ void UPortsGameFlow::StartTestGame(const FString& Spec)
 	if (Spec != TEXT("menu") && Spec != TEXT("credits")) MenuDueIn = 0;
 	if (Spec == TEXT("continue")) { ContinueSaved(); return; }
 	if (Spec == TEXT("setup")) { ShowSetup(); return; }
+	// "tutorial": the practice game on this screen; "tutoriallobby": waiting for the player's own device.
+	if (Spec == TEXT("tutorial")) { BeginTutorial(nullptr); return; }
+	if (Spec == TEXT("tutoriallobby")) { bTutorialLobby = true; ShowTutorialLobby(); return; }
 	// "lobbyplay": start as soon as one device has joined; "lobbyplay2": wait for two; "...timer": with the turn timer on.
 	if (Spec.StartsWith(TEXT("lobby")))
 	{
@@ -1602,8 +1893,16 @@ void UPortsGameFlow::StartTestGame(const FString& Spec)
 		bTestLobbyPlay = Spec.StartsWith(TEXT("lobbyplay"));
 		TestLobbySpec = Spec;
 		TestLobbyHumans = 1;
-		for (int32 N = 2; N <= 6; N++) if (Spec.Contains(FString::FromInt(N))) TestLobbyHumans = N;
+		// The number of devices to wait for comes straight after "lobbyplay" (other numbers in the spec are not it).
+		if (bTestLobbyPlay) TestLobbyHumans = FMath::Clamp(FCString::Atoi(*Spec.Mid(9)), 1, 6);
 		bTestLobbyTimer = Spec.Contains(TEXT("timer"));
+		// "nohistory": History Mode off; "timer45": 45-second turns. The lobby tells the devices both.
+		SetupForm->history = !Spec.Contains(TEXT("nohistory"));
+		SetupForm->timer = bTestLobbyTimer;
+		{
+			const int32 At = Spec.Find(TEXT("timer"));
+			SetupForm->timerSeconds = At == INDEX_NONE ? 0 : FCString::Atoi(*Spec.Mid(At + 5));
+		}
 		OpenLobbyRoom();
 		ShowSetup();
 		return;
@@ -1618,7 +1917,8 @@ void UPortsGameFlow::StartTestGame(const FString& Spec)
 	Setup.mode = Parts[0];
 	Setup.difficulty = Parts[2];
 	Setup.prePlague = !Parts.Contains(TEXT("nopre"));
-	Setup.timer = Parts.Contains(TEXT("timer"));
+	// "timer": the rule book's turn length; "timer45": 45 seconds.
+	for (const FString& Part : Parts) if (Part.StartsWith(TEXT("timer"))) { Setup.timer = true; Setup.timerSeconds = FCString::Atoi(*Part.Mid(5)); }
 	Setup.seed = TEXT("test-") + Spec;
 	const int32 Count = FMath::Clamp(FCString::Atoi(*Parts[1]), 2, 6);
 	static const TCHAR* Names[] = { TEXT("House of the Anchor"), TEXT("House of the Lion"), TEXT("House of the Rose"), TEXT("House of the Star"), TEXT("House of the Ship"), TEXT("House of the Sun") };
@@ -1642,7 +1942,7 @@ void UPortsGameFlow::StartTestGame(const FString& Spec)
 	for (const FString& Part : Parts) if (Part.StartsWith(TEXT("finale:"))) TestFinale = FCString::Atoi(*Part.Mid(7));
 	bTestReload = Parts.Contains(TEXT("reload"));
 	TestSetup = MakeShared<FPortsSetup>(Setup);
-	BeginGame(Setup, true);
+	BeginGame(Setup, true, !Parts.Contains(TEXT("nohistory")));
 }
 
 void UPortsGameFlow::TestBeforeShot()
